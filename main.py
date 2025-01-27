@@ -81,7 +81,7 @@ class Chat(App):
             response = ""
 
             # 非同期マッピングで delta.content を取り出す
-            async def stream_map():
+            def stream_map():
                 nonlocal response
                 nonlocal stream
                 for chunk in stream:
@@ -102,18 +102,10 @@ class Chat(App):
         container.update(container.renderable + f"[b]{role}:[/b] ")
         self.refresh()
 
-        if hasattr(stream, '__aiter__'):  # async iter
-            async for chunk in stream:
-                container.update(container.renderable + str(chunk))
-                self.refresh()
-                await asyncio.sleep(0.01)
-        elif isinstance(stream, list):  # list
-            for chunk in stream:
-                container.update(container.renderable + str(chunk))
-                self.refresh()
-                await asyncio.sleep(0.01)
-        else:
-            return
+        for chunk in stream:
+            container.update(container.renderable + str(chunk))
+            self.refresh()
+            await asyncio.sleep(0.01)
 
         container.update(container.renderable + "\n")
         self.refresh()
