@@ -71,16 +71,16 @@ class ChatApp(App):
     async def update_chat(self, role: str, stream):
         container = self.query_one("#chat-container", Static)
         container.update(container.renderable + f"[b]{role}:[/b] ")
-        self.refresh()
+        container.refresh()
         await asyncio.sleep(0.01)
 
         for chunk in stream:
             container.update(container.renderable + str(chunk))
-            self.refresh()
+            container.refresh()
             await asyncio.sleep(0.01)
 
         container.update(container.renderable + "\n")
-        self.refresh()
+        container.refresh()
         await asyncio.sleep(0.01)
 
     def display_thread_list(self):
