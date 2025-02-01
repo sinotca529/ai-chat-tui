@@ -1,7 +1,7 @@
 import asyncio
 from role import Role
 from ui.thread_select_window import ThreadSelectWindow
-from ui.thread import Thread
+from ui.thread_view import ThreadView
 from textual.app import App, ComposeResult
 from textual.events import Paste
 from textual.widgets import Header, Footer, TextArea
@@ -45,7 +45,7 @@ class ChatApp(App):
     def compose(self) -> ComposeResult:
         """ウィジェットを配置."""
         yield Header()
-        yield Thread(id="chat-container")
+        yield ThreadView(id="chat-container")
         yield TextArea(id="input-box")
         yield Footer()
 
@@ -80,7 +80,7 @@ class ChatApp(App):
         if user_message:
             user_message = user_message.strip()
 
-            thread = self.query_one("#chat-container", Thread)
+            thread = self.query_one("#chat-container", ThreadView)
             response = self.chat_manager.send_message(user_message)
 
             await thread.update_chat(Role.USER, [user_message])
@@ -93,11 +93,11 @@ class ChatApp(App):
 
     async def display_thread(self, thread_id: str):
         """選択したスレッドをチャット画面に表示."""
-        container = self.query_one("#chat-container", Thread)
+        container = self.query_one("#chat-container", ThreadView)
         container.clear()
 
         self.chat_manager.load_thread(thread_id)
         for msg in self.chat_manager.msg_list:
             role = Role.USER if msg["role"] == "user" else Role.ASSISTANT
-            thread = self.query_one("#chat-container", Thread)
+            thread = self.query_one("#chat-container", ThreadView)
             await thread.update_chat(role, [msg["content"]])

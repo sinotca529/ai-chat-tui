@@ -4,7 +4,7 @@ from textual.widgets import ListView, ListItem, Static
 from textual.containers import HorizontalGroup
 
 
-class Thread(ListView):
+class ThreadView(ListView):
     CSS = """
     Thread {
         width: 100%;
