@@ -1,9 +1,32 @@
 import asyncio
+from enum import Enum
 from ui.thread_select_window import ThreadSelectWindow
 from textual.app import App, ComposeResult
-from textual.containers import Container
-from textual.widgets import Header, Footer, Input, Static
+from textual.events import Paste
+from textual.containers import HorizontalGroup
+from textual.widgets import Header, Footer, Input, Static, ListView, ListItem, TextArea
 from chat_manager import ChatManager
+
+
+class Role(Enum):
+    USER = 1
+    ASSISTANT = 2
+
+    def role_name(self) -> str:
+        match self:
+            case self.USER:
+                return "user"
+
+            case self.ASSISTANT:
+                return "assistant"
+
+    def __str__(self) -> str:
+        match self:
+            case self.USER:
+                return "ME"
+
+            case self.ASSISTANT:
+                return "AI"
 
 
 class ChatApp(App):
@@ -13,30 +36,19 @@ class ChatApp(App):
         height: 85%;
         overflow: auto;
         padding: 1;
+        background: black;
     }
 
-    Input {
-        width: 100%;
-        height: auto;
-        padding: 1;
+    ListItem {
+        margin-bottom: 1
     }
 
-    Footer {
+    .role {
+        width: 5;
     }
 
-    .message {
-        padding: 1;
-        margin-bottom: 1;
-    }
-
-    .message.user {
-        color: blue;
-        background: lightblue;
-    }
-
-    .message.ai {
-        color: green;
-        background: lightgreen;
+    .assistant {
+        color: lightgreen;
     }
     """
 
@@ -54,51 +66,63 @@ class ChatApp(App):
     def compose(self) -> ComposeResult:
         """ウィジェットを配置."""
         yield Header()
-        yield Container(Static(id="chat-container"), id="chat-container")
-        yield Input(placeholder="Input message...", id="input-box")
+        yield ListView(id="chat-container")
+        yield TextArea(id="input-box")
         yield Footer()
 
     async def on_mount(self) -> None:
         """アプリ起動時の初期化."""
-        self.set_focus(self.query_one("#input-box", Input))
+        self.set_focus(self.query_one("#input-box", TextArea))
 
-    def on_key(self, event) -> None:
+    async def on_key(self, event) -> None:
         """ショートカットキーでフローティングウィンドウをトグル."""
         if event.key == "ctrl+t":
             self.display_thread_list()
+        if event.key == "tab":
+            user_message = await self.take_input_value()
+            await self.chat(user_message)
 
-    async def on_input_submitted(self, event: Input.Submitted) -> None:
-        """入力が送信されたときの処理."""
+    def on_paste(self, event: Paste) -> None:
+        """クリップボードの内容をテキストエリアに貼り付け"""
+        with open('log', 'w') as f:
+            print(event.text, file=f)
+        input_box = self.query_one("#input-box", TextArea)
+        input_box.text += event.text
 
-        user_message = event.value
-        if user_message.strip():
-            # show user message
-            await self.update_chat("You", [user_message])
-            event.input.value = ""  # clear input box
-            self.refresh()
-            await asyncio.sleep(0.01)
+    async def take_input_value(self) -> str:
+        input_box = self.query_one("#input-box", TextArea)
+        user_message = input_box.text
+        input_box.text = ""
+        input_box.refresh()
+        await asyncio.sleep(0.01)
+        return user_message
+
+    async def chat(self, user_message: str) -> None:
+        if user_message:
+            user_message = user_message.strip()
+            await self.update_chat(Role.USER, [user_message])
 
             # send message to API and show response
             response = self.chat_manager.send_message(user_message)
-            await self.update_chat("AI", response)
+            await self.update_chat(Role.ASSISTANT, response)
 
-            # update sidebar
-            self.display_thread_list()
+    async def update_chat(self, role: Role, stream):
+        container = self.query_one("#chat-container", ListView)
 
-    async def update_chat(self, role: str, stream):
-        container = self.query_one("#chat-container", Static)
-        container.update(container.renderable + f"[b]{role}:[/b] ")
-        container.refresh()
-        await asyncio.sleep(0.01)
+        role_elem = Static(str(role), classes="role")
+        role_elem.add_class(role.role_name())
+
+        msg_elem = Static(classes="msg")
+        msg_elem.add_class(role.role_name())
+
+        line_elem = ListItem(HorizontalGroup(role_elem, msg_elem))
+        container.append(line_elem)
+        await asyncio.sleep(0.1)
 
         for chunk in stream:
-            container.update(container.renderable + str(chunk))
-            container.refresh()
-            await asyncio.sleep(0.01)
-
-        container.update(container.renderable + "\n")
-        container.refresh()
-        await asyncio.sleep(0.01)
+            msg_elem.update(msg_elem.renderable + str(chunk))
+            msg_elem.refresh()
+            await asyncio.sleep(0.1)
 
     def display_thread_list(self):
         """スレッドリストをフローティングスクリーンで表示."""
@@ -107,10 +131,10 @@ class ChatApp(App):
 
     async def display_thread(self, thread_id: str):
         """選択したスレッドをチャット画面に表示."""
-        container = self.query_one("#chat-container", Static)
-        container.update("")
+        container = self.query_one("#chat-container", ListView)
+        container.clear()
 
         self.chat_manager.load_thread(thread_id)
         for msg in self.chat_manager.msg_list:
-            role = "You" if msg["role"] == "user" else "AI"
+            role = Role.USER if msg["role"] == "user" else Role.ASSISTANT
             await self.update_chat(role, [msg["content"]])
