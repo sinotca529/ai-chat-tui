@@ -1,32 +1,11 @@
 import asyncio
-from enum import Enum
+from role import Role
 from ui.thread_select_window import ThreadSelectWindow
+from ui.thread import Thread
 from textual.app import App, ComposeResult
 from textual.events import Paste
-from textual.containers import HorizontalGroup
-from textual.widgets import Header, Footer, Input, Static, ListView, ListItem, TextArea
+from textual.widgets import Header, Footer, TextArea
 from chat_manager import ChatManager
-
-
-class Role(Enum):
-    USER = 1
-    ASSISTANT = 2
-
-    def role_name(self) -> str:
-        match self:
-            case self.USER:
-                return "user"
-
-            case self.ASSISTANT:
-                return "assistant"
-
-    def __str__(self) -> str:
-        match self:
-            case self.USER:
-                return "ME"
-
-            case self.ASSISTANT:
-                return "AI"
 
 
 class ChatApp(App):
@@ -66,7 +45,7 @@ class ChatApp(App):
     def compose(self) -> ComposeResult:
         """ウィジェットを配置."""
         yield Header()
-        yield ListView(id="chat-container")
+        yield Thread(id="chat-container")
         yield TextArea(id="input-box")
         yield Footer()
 
@@ -100,29 +79,12 @@ class ChatApp(App):
     async def chat(self, user_message: str) -> None:
         if user_message:
             user_message = user_message.strip()
-            await self.update_chat(Role.USER, [user_message])
 
-            # send message to API and show response
+            thread = self.query_one("#chat-container", Thread)
             response = self.chat_manager.send_message(user_message)
-            await self.update_chat(Role.ASSISTANT, response)
 
-    async def update_chat(self, role: Role, stream):
-        container = self.query_one("#chat-container", ListView)
-
-        role_elem = Static(str(role), classes="role")
-        role_elem.add_class(role.role_name())
-
-        msg_elem = Static(classes="msg")
-        msg_elem.add_class(role.role_name())
-
-        line_elem = ListItem(HorizontalGroup(role_elem, msg_elem))
-        container.append(line_elem)
-        await asyncio.sleep(0.1)
-
-        for chunk in stream:
-            msg_elem.update(msg_elem.renderable + str(chunk))
-            msg_elem.refresh()
-            await asyncio.sleep(0.1)
+            await thread.update_chat(Role.USER, [user_message])
+            await thread.update_chat(Role.ASSISTANT, response)
 
     def display_thread_list(self):
         """スレッドリストをフローティングスクリーンで表示."""
@@ -131,10 +93,11 @@ class ChatApp(App):
 
     async def display_thread(self, thread_id: str):
         """選択したスレッドをチャット画面に表示."""
-        container = self.query_one("#chat-container", ListView)
+        container = self.query_one("#chat-container", Thread)
         container.clear()
 
         self.chat_manager.load_thread(thread_id)
         for msg in self.chat_manager.msg_list:
             role = Role.USER if msg["role"] == "user" else Role.ASSISTANT
-            await self.update_chat(role, [msg["content"]])
+            thread = self.query_one("#chat-container", Thread)
+            await thread.update_chat(role, [msg["content"]])
