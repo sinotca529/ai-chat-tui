@@ -4,7 +4,7 @@ from textual.widgets import ListView, ListItem, Static
 from textual.containers import HorizontalGroup
 
 
-class ThreadView(ListView):
+class TreeView(ListView):
     CSS = """
     Thread {
         width: 100%;
@@ -42,3 +42,9 @@ class ThreadView(ListView):
             msg_elem.update(msg_elem.renderable + str(chunk))
             msg_elem.refresh()
             await asyncio.sleep(0.1)
+
+    async def render_thread(self, thread: list[dict]):
+        self.clear()
+        for msg in thread:
+            role = Role.from_str(msg["role"])
+            await self.update_chat(role, [msg["content"]])

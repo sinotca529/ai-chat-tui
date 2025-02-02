@@ -1,11 +1,14 @@
 import asyncio
 from role import Role
 from ui.thread_select_window import ThreadSelectWindow
-from ui.thread_view import ThreadView
+from ui.thread_view import TreeView
 from textual.app import App, ComposeResult
 from textual.events import Paste
 from textual.widgets import Header, Footer, TextArea
-from chat_manager import ChatManager
+from chat_tree_store import ChatTreeStore
+from api_handler import ApiHandler
+from chat_tree import ChatTree
+from chat_tree_handler import ChatTreeHandler
 
 
 class ChatApp(App):
@@ -39,13 +42,14 @@ class ChatApp(App):
         save_dir: str
     ):
         super().__init__()
-        self.chat_manager = ChatManager(base_url, api_key, model, save_dir)
-        self.show_floating = False
+        self.chat_tree_sotre = ChatTreeStore(save_dir)
+        self.api_handler = ApiHandler(base_url, api_key, model)
+        self.tree_handler = ChatTreeHandler(ChatTree.new(), self.api_handler)
 
     def compose(self) -> ComposeResult:
         """ウィジェットを配置."""
         yield Header()
-        yield ThreadView(id="chat-container")
+        yield TreeView(id="chat-container")
         yield TextArea(id="input-box")
         yield Footer()
 
@@ -77,27 +81,33 @@ class ChatApp(App):
         return user_message
 
     async def chat(self, user_message: str) -> None:
-        if user_message:
-            user_message = user_message.strip()
+        if not user_message:
+            return
+        user_message = user_message.strip()
+        if not user_message:
+            return
 
-            thread = self.query_one("#chat-container", ThreadView)
-            response = self.chat_manager.send_message(user_message)
+        # Do chat
+        resp_stream = self.tree_handler.send_message(user_message)
 
-            await thread.update_chat(Role.USER, [user_message])
-            await thread.update_chat(Role.ASSISTANT, response)
+        # Update chat view
+        thread = self.query_one("#chat-container", TreeView)
+        await thread.update_chat(Role.USER, [user_message])
+        await thread.update_chat(Role.ASSISTANT, resp_stream)
+
+        # Save chat log
+        self.chat_tree_sotre.save(self.tree_handler.tree)
 
     def display_thread_list(self):
         """スレッドリストをフローティングスクリーンで表示."""
-        thread_ids = self.chat_manager.thread_id_list()
+        thread_ids = self.chat_tree_sotre.tree_id_list()
         self.push_screen(ThreadSelectWindow(thread_ids), self.display_thread)
 
     async def display_thread(self, thread_id: str):
         """選択したスレッドをチャット画面に表示."""
-        container = self.query_one("#chat-container", ThreadView)
-        container.clear()
-
-        self.chat_manager.load_thread(thread_id)
-        for msg in self.chat_manager.msg_list:
-            role = Role.USER if msg["role"] == "user" else Role.ASSISTANT
-            thread = self.query_one("#chat-container", ThreadView)
-            await thread.update_chat(role, [msg["content"]])
+        thread_view = self.query_one("#chat-container", TreeView)
+        self.tree_handler = ChatTreeHandler(
+            self.chat_tree_sotre.load(thread_id),
+            self.api_handler
+        )
+        await thread_view.render_thread(self.tree_handler.current_thread())
