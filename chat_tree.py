@@ -9,14 +9,15 @@ class ChatTree:
         self.messages = messages
 
     def insert(self, parent: str, role: Role, message: str) -> int:
+        added_index = len(self.messages)
         data = {
             "role": role.role_name(),
             "content": message,
+            "id": added_index,
             "parent": parent,
             "children": [],
             "siblings": [],
         }
-        added_index = len(self.messages)
 
         if len(self.messages) == 0:
             data["parent"] = None

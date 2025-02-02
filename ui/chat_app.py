@@ -1,5 +1,4 @@
 import asyncio
-from role import Role
 from ui.thread_select_window import ThreadSelectWindow
 from ui.thread_view import TreeView
 from textual.app import App, ComposeResult
@@ -29,8 +28,19 @@ class ChatApp(App):
         width: 5;
     }
 
+    .msg {
+        height: auto;
+        border: none;
+        background: transparent;
+    }
+
     .assistant {
         color: lightgreen;
+    }
+
+    .siblings {
+        color: gray;
+        text-align: right;
     }
     """
 
@@ -58,12 +68,16 @@ class ChatApp(App):
         self.set_focus(self.query_one("#input-box", TextArea))
 
     async def on_key(self, event) -> None:
-        """ショートカットキーでフローティングウィンドウをトグル."""
-        if event.key == "ctrl+t":
-            self.display_thread_list()
-        if event.key == "tab":
-            user_message = await self.take_input_value()
-            await self.chat(user_message)
+        match event.key:
+            case "ctrl+c":
+                self.exit()
+
+            case "ctrl+t":
+                self.display_thread_list()
+
+            case "ctrl+d":
+                user_message = await self.take_input_value()
+                await self.chat(user_message)
 
     def on_paste(self, event: Paste) -> None:
         """クリップボードの内容をテキストエリアに貼り付け"""
@@ -80,20 +94,20 @@ class ChatApp(App):
         await asyncio.sleep(0.01)
         return user_message
 
-    async def chat(self, user_message: str) -> None:
-        if not user_message:
+    async def chat(self, user_msg: str) -> None:
+        if not user_msg:
             return
-        user_message = user_message.strip()
-        if not user_message:
+        user_msg = user_msg.strip()
+        if not user_msg:
             return
 
         # Do chat
-        resp_stream = self.tree_handler.send_message(user_message)
+        user_msg_id, resp_stream = self.tree_handler.send_message(user_msg)
 
         # Update chat view
         thread = self.query_one("#chat-container", TreeView)
-        await thread.update_chat(Role.USER, [user_message])
-        await thread.update_chat(Role.ASSISTANT, resp_stream)
+        await thread.add_user_message(user_msg, user_msg_id, [])
+        await thread.add_assistant_message(resp_stream)
 
         # Save chat log
         self.chat_tree_sotre.save(self.tree_handler.tree)

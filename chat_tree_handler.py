@@ -10,7 +10,7 @@ class ChatTreeHandler:
         self.tree = tree
         self.thread_id = self.tree.first_thread_id()
 
-    def send_message(self, msg: str) -> Generator[str, None, None]:
+    def send_message(self, msg: str) -> (int, Generator[str, None, None]):
         """OpenAI API にメッセージを送信"""
         thread = [
             {"role": e["role"], "content": e["content"]}
@@ -18,13 +18,16 @@ class ChatTreeHandler:
         ]
         stream = self.api_handler.send_message(thread, msg)
 
-        response = ""
-        for chunk in stream:
-            response += chunk
-            yield chunk
+        user_message_id = self.tree.append(Role.USER, msg)
 
-        self.tree.append(Role.USER, msg)
-        self.thread_id = self.tree.append(Role.ASSISTANT, response)
+        def generator():
+            response = ""
+            for chunk in stream:
+                response += chunk
+                yield chunk
+            self.thread_id = self.tree.append(Role.ASSISTANT, response)
+
+        return user_message_id, generator()
 
     def current_thread(self):
         return self.tree.thread(self.thread_id)
