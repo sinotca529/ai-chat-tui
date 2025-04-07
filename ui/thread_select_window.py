@@ -4,18 +4,7 @@ from textual.widgets import ListView, ListItem, Label
 
 
 class ThreadSelectWindow(ModalScreen[str]):
-    CSS = """
-    ThreadSelectWindow {
-        align: center middle;
-    }
-    ListView {
-        width: 80%;
-        height: 80%;
-    }
-    ListItem {
-        width: 100%;
-    }
-    """
+    CSS_PATH = "../tcss/thread_select_window.tcss"
 
     def __init__(self, thread_ids: list[str]):
         super().__init__()

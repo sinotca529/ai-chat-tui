@@ -11,38 +11,7 @@ from chat_tree_handler import ChatTreeHandler
 
 
 class ChatApp(App):
-    CSS = """
-    #chat-container {
-        width: 100%;
-        height: 85%;
-        overflow: auto;
-        padding: 1;
-        background: black;
-    }
-
-    ListItem {
-        margin-bottom: 1
-    }
-
-    .role {
-        width: 5;
-    }
-
-    .msg {
-        height: auto;
-        border: none;
-        background: transparent;
-    }
-
-    .assistant {
-        color: lightgreen;
-    }
-
-    .siblings {
-        color: gray;
-        text-align: right;
-    }
-    """
+    CSS_PATH = "../tcss/chat_app.tcss"
 
     def __init__(
         self,

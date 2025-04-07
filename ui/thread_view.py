@@ -8,15 +8,7 @@ from textual.screen import ModalScreen
 
 
 class EditUserMessageWindow(ModalScreen[str]):
-    CSS = """
-    EditUserMessageWindow {
-        align: center middle;
-    }
-    VerticalGroup {
-        width: 60%;
-        height: 60%;
-    }
-    """
+    CSS_PATH = "../tcss/edit_user_message_window.tcss"
 
     def __init__(self, current_message: str) -> None:
         super().__init__()

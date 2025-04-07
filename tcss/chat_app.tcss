@@ -1,0 +1,30 @@
+#chat-container {
+  width: 100%;
+  height: 85%;
+  overflow: auto;
+  padding: 1;
+  background: black;
+}
+
+ListItem {
+  margin-bottom: 1
+}
+
+.role {
+  width: 5;
+}
+
+.msg {
+  height: auto;
+  border: none;
+  background: transparent;
+}
+
+.assistant {
+  color: lightgreen;
+}
+
+.siblings {
+  color: gray;
+  text-align: right;
+}

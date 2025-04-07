@@ -1,0 +1,10 @@
+ThreadSelectWindow {
+  align: center middle;
+}
+ListView {
+  width: 80%;
+  height: 80%;
+}
+ListItem {
+  width: 100%;
+}
