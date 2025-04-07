@@ -1,4 +1,4 @@
-ThreadSelectWindow {
+TreeSelectWindow {
   align: center middle;
 }
 ListView {

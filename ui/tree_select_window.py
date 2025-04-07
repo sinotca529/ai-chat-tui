@@ -3,8 +3,8 @@ from textual.screen import ModalScreen
 from textual.widgets import ListView, ListItem, Label
 
 
-class ThreadSelectWindow(ModalScreen[str]):
-    CSS_PATH = "../tcss/thread_select_window.tcss"
+class TreeSelectWindow(ModalScreen[str]):
+    CSS_PATH = "../tcss/tree_select_window.tcss"
 
     def __init__(self, thread_ids: list[str]):
         super().__init__()

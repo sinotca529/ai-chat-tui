@@ -20,6 +20,10 @@ ListItem {
   background: transparent;
 }
 
+.user {
+  color: white;
+}
+
 .assistant {
   color: lightgreen;
 }

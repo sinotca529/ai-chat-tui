@@ -10,14 +10,14 @@ from textual.screen import ModalScreen
 class EditUserMessageWindow(ModalScreen[str]):
     CSS_PATH = "../tcss/edit_user_message_window.tcss"
 
-    def __init__(self, current_message: str) -> None:
+    def __init__(self, current_msg: str) -> None:
         super().__init__()
-        self.current_message = current_message
+        self._current_msg = current_msg
 
     def compose(self) -> ComposeResult:
         with VerticalGroup():
             yield Static("Edit Message...")
-            yield TextArea(self.current_message)
+            yield TextArea(self._current_msg)
 
     def on_key(self, event) -> None:
         match event.key:
@@ -60,6 +60,10 @@ class UserMessage(ListItem):
 
 
 class TreeView(ListView):
+    def __init__(self, chat_cb, id: str):
+        super().__init__(id=id)
+        self._chat_cb = chat_cb
+
     async def add_user_message(
         self,
         message: str,
@@ -94,7 +98,7 @@ class TreeView(ListView):
             await asyncio.sleep(0.1)
 
     async def render_thread(self, thread: list[dict]) -> None:
-        self.clear()
+        await self.clear()
         for msg in thread:
             match Role.from_str(msg["role"]):
                 case Role.USER:
@@ -120,7 +124,7 @@ class TreeView(ListView):
 
                 self.app.push_screen(
                     EditUserMessageWindow(current_msg),
-                    self._tmp
+                    self._change_msg(message_id)
                 )
 
             case "h":
@@ -128,8 +132,10 @@ class TreeView(ListView):
                 if not message_id:
                     return
 
-    def _tmp(self) -> None:
-        pass
+    def _change_msg(self, msg_id):
+        async def inner(msg: str):
+            await self._chat_cb(msg, msg_id)
+        return inner
 
     def _highlighted_user_message_id(self) -> int | None:
         if self.highlighted_child is None:
