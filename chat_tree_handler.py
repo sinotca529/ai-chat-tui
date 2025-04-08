@@ -2,6 +2,7 @@ from chat_tree import ChatTree
 from api_handler import ApiHandler
 from typing import Generator
 from role import Role
+from util.util import logger
 
 
 class ChatTreeHandler:
@@ -10,16 +11,8 @@ class ChatTreeHandler:
         self._tree = tree
         self._thread_id = self._tree.first_thread_id()
 
-    def send_message(
-        self,
-        msg: str,
-        modified_id: int = None
-    ) -> (int, Generator[str, None, None]):
+    def send_message(self, msg: str) -> (int, Generator[str, None, None]):
         """OpenAI API にメッセージを送信"""
-
-        # メッセージを改変するなら、スレッドを切り替える
-        if modified_id is not None:
-            self._thread_id = self._tree.parent(modified_id)
 
         thread = [
             {"role": e["role"], "content": e["content"]}
@@ -43,14 +36,24 @@ class ChatTreeHandler:
 
         return user_msg_id, generator()
 
+    def get_parent(self, node_id: int) -> int:
+        """親ノードの id を返す"""
+        return self._tree.parent(node_id)
+
     def current_thread(self):
         return self._tree.thread(self._thread_id)
 
     def get_thread_id(self) -> int:
         return self._thread_id
 
+    def set_thread_id(self, id: int):
+        self._thread_id = id
+
     def get_tree_id(self) -> int:
         return self._tree.get_tree_id()
 
     def get_tree(self) -> ChatTree:
         return self._tree
+
+    def get_children(self, id: int) -> list[int]:
+        return self._tree.get_children(id)

@@ -5,6 +5,7 @@ from textual.widgets import ListView, ListItem, Static, TextArea
 from textual.containers import HorizontalGroup, VerticalGroup
 from textual.app import ComposeResult
 from textual.screen import ModalScreen
+from util.util import logger
 
 
 class EditUserMessageWindow(ModalScreen[str]):
@@ -63,6 +64,11 @@ class TreeView(ListView):
     def __init__(self, chat_cb, id: str):
         super().__init__(id=id)
         self._chat_cb = chat_cb
+        self._id_list = []
+
+    async def clear(self):
+        await super().clear()
+        self._id_list.clear()
 
     async def add_user_message(
         self,
@@ -71,14 +77,17 @@ class TreeView(ListView):
         siblings: list[int]
     ) -> None:
         self.append(UserMessage(message, message_id, siblings))
+        self._id_list.append(message_id)
         self.refresh()
         await asyncio.sleep(0.1)
 
     async def add_assistant_message(
         self,
-        stream: list[str] | Generator[str, None, None]
+        stream: list[str] | Generator[str, None, None],
+        message_id: int,
     ) -> None:
         role = Role.ASSISTANT
+        self._id_list.append(message_id)
 
         role_elem = Static(str(role), classes="role")
         role_elem.add_class(role.role_name())
@@ -109,7 +118,8 @@ class TreeView(ListView):
                     )
                 case Role.ASSISTANT:
                     await self.add_assistant_message(
-                        [msg["content"]]
+                        [msg["content"]],
+                        msg["id"],
                     )
 
     async def on_key(self, event) -> None:
@@ -120,11 +130,13 @@ class TreeView(ListView):
                     return
 
                 msg_elem = self.query_one(f"#msg{message_id}", Static)
+
                 current_msg = msg_elem.renderable
+                parent_id = self._id_list[self._id_list.index(message_id) - 1]
 
                 self.app.push_screen(
                     EditUserMessageWindow(current_msg),
-                    self._change_msg(message_id)
+                    self._change_msg(parent_id)
                 )
 
             case "h":
@@ -132,9 +144,11 @@ class TreeView(ListView):
                 if not message_id:
                     return
 
-    def _change_msg(self, msg_id):
+    def _change_msg(self, reply_to_id: int):
+        logger(__name__).info(reply_to_id)
+
         async def inner(msg: str):
-            await self._chat_cb(msg, msg_id)
+            await self._chat_cb(msg, reply_to_id)
         return inner
 
     def _highlighted_user_message_id(self) -> int | None:
