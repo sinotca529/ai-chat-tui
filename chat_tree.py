@@ -83,6 +83,9 @@ class ChatTree:
     def get_tree_id(self) -> int:
         return self._tree_id
 
+    def get_children(self, id: int) -> list[int]:
+        return self.messages[id]["children"]
+
     @staticmethod
     def from_file(filepath: str) -> "ChatTree":
         with open(filepath, "r", encoding="utf-8") as f:

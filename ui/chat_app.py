@@ -8,6 +8,7 @@ from chat_tree_store import ChatTreeStore
 from api_handler import ApiHandler
 from chat_tree import ChatTree
 from chat_tree_handler import ChatTreeHandler
+from util.util import logger
 
 
 class ChatApp(App):
@@ -65,27 +66,34 @@ class ChatApp(App):
 
     async def chat(self, user_msg: str, thread_id: int = None) -> None:
         """チャットをする。
-        user_msg: メッセージ
-        thread_id: 起点となるスレッド (メッセージの返信先)
-                   省略した場合、現在のスレッドの末尾に返信。
+        user_msg:  メッセージ
+        thread_id: 起点となるスレッド、つまり返信先。省略した場合、現在のスレッドの末尾に返信
         """
         if not user_msg:
             return
+
         user_msg = user_msg.strip()
         if not user_msg:
             return
 
-        # Do chat
-        user_msg_id, resp_stream = self.tree_handler.send_message(
-            user_msg,
-            thread_id
-        )
+        # スレッドの選択
+        if thread_id is not None:
+            self.tree_handler.set_thread_id(thread_id)
+            logger(__name__).info(self.tree_handler.get_thread_id())
+            await self._display_current_thread()
+
+        thread_id = self.tree_handler.get_thread_id()
+
+        # 兄弟ノードの取得
+        siblings = self.tree_handler.get_children(thread_id)
+
+        # チャットを実施
+        user_msg_id, resp_stream = self.tree_handler.send_message(user_msg)
 
         # Update chat view
-        # await self._display_thread(self.tree_handler.get_tree_id())
         thread = self.query_one("#chat-container", TreeView)
-        await thread.add_user_message(user_msg, user_msg_id, [])
-        await thread.add_assistant_message(resp_stream)
+        await thread.add_user_message(user_msg, user_msg_id, siblings)
+        await thread.add_assistant_message(resp_stream, user_msg_id + 1)
 
         # Save chat log
         self.chat_tree_sotre.save(self.tree_handler.get_tree())
@@ -93,10 +101,17 @@ class ChatApp(App):
     def _display_tree_list(self):
         """ツリーリストをフローティングスクリーンで表示."""
         tree_ids = self.chat_tree_sotre.tree_id_list()
-        self.push_screen(TreeSelectWindow(tree_ids), self._display_thread)
+        self.push_screen(
+            TreeSelectWindow(tree_ids),
+            self._display_default_thread
+        )
 
-    async def _display_thread(self, tree_id: str):
-        """指定したツリーの現在のスレッドをチャット画面に表示."""
+    async def _display_current_thread(self):
+        thread_view = self.query_one("#chat-container", TreeView)
+        await thread_view.render_thread(self.tree_handler.current_thread())
+
+    async def _display_default_thread(self, tree_id: str):
+        """指定したツリーのデフォルトのスレッドを表示."""
         thread_view = self.query_one("#chat-container", TreeView)
         self.tree_handler = ChatTreeHandler(
             self.chat_tree_sotre.load(tree_id),
