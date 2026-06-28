@@ -146,6 +146,7 @@ class ChatApp:
                 self._branch_target_id = None
             self._pending_message = msg
             self._chat_view.start_streaming(msg)
+            event.app.layout.focus(self._chat_view.stream_window)
             self._stream_task = asyncio.ensure_future(self._do_stream(msg))
 
         @kb.add("tab", filter=is_input)
@@ -324,6 +325,9 @@ class ChatApp:
                 self._chat_view.append_chunk(chunk)
                 self._app.invalidate()
             self._refresh_chat_view()
+            last_win = self._chat_view.last_content_window()
+            if last_win:
+                self._app.layout.focus(last_win)
             if not self._session.title:
                 asyncio.ensure_future(self._auto_title())
         except asyncio.CancelledError:
