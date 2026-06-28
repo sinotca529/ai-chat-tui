@@ -88,6 +88,12 @@ class ChatView:
             return self._content_windows[self._cursor_index]
         return None
 
+    def set_cursor_to_node(self, node_id: int) -> None:
+        for i, e in enumerate(self._entries):
+            if e.node.id == node_id:
+                self._cursor_index = i
+                return
+
     def last_content_window(self) -> Window | None:
         if self._content_windows:
             return self._content_windows[-1]

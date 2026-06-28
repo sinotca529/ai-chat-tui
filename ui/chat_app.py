@@ -376,11 +376,7 @@ class ChatApp:
         next_sibling_id = siblings[(current_pos + direction) % len(siblings)]
         self._session.navigate_to_branch_end(next_sibling_id)
         self._refresh_chat_view()
-        entries = self._chat_view._entries
-        for i, e in enumerate(entries):
-            if e.node.id == next_sibling_id:
-                self._chat_view._cursor_index = i
-                break
+        self._chat_view.set_cursor_to_node(next_sibling_id)
 
     def _input_prefix(self, lineno: int, wrap_count: int):
         if lineno == 0 and wrap_count == 0:
