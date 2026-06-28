@@ -33,10 +33,7 @@ class ApiHandler:
         response = await self._client.models.list()
         return sorted(m.id for m in response.data)
 
-    async def stream(
-        self, thread: list[dict], new_message: str
-    ) -> AsyncIterator[str]:
-        messages = thread + [{"role": "user", "content": new_message}]
+    async def stream(self, messages: list[dict]) -> AsyncIterator[str]:
         response = await self._client.chat.completions.create(
             model=self._model,
             messages=messages,

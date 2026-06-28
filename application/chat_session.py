@@ -54,19 +54,25 @@ class ChatSession:
         if self._tree.current_id is not None:
             self._store.save(self._tree)
 
-    async def send_message(self, msg: str) -> AsyncIterator[str]:
-        effective = self.effective_system_prompt
-        thread_messages = [
+    def _build_thread_messages(self) -> list[dict]:
+        messages = [
             {"role": str(e.node.role), "content": e.node.content}
             for e in self.current_thread()
         ]
+        effective = self.effective_system_prompt
         if effective:
-            thread_messages = [{"role": "system", "content": effective}] + thread_messages
+            messages = [{"role": "system", "content": effective}] + messages
+        return messages
+
+    async def send_message(self, msg: str) -> AsyncIterator[str]:
+        thread_messages = self._build_thread_messages()
         user_id = self._tree.insert(self._tree.current_id, Role.USER, msg)
         self._tree.set_current(user_id)
 
         full_response = ""
-        async for chunk in self._api.stream(thread_messages, msg):
+        async for chunk in self._api.stream(
+            thread_messages + [{"role": "user", "content": msg}]
+        ):
             full_response += chunk
             yield chunk
 
@@ -102,11 +108,7 @@ class ChatSession:
         self._store.save(self._tree)
 
     async def generate_title(self) -> str:
-        messages = [
-            {"role": str(e.node.role), "content": e.node.content}
-            for e in self.current_thread()
-        ]
-        title = await self._api.generate_title(messages)
+        title = await self._api.generate_title(self._build_thread_messages())
         self.set_title(title)
         return title
 
