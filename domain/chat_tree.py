@@ -61,6 +61,13 @@ class ChatTree:
             return [node_id]
         return [n.id for n in self._nodes if n.parent_id == parent_id]
 
+    def rollback(self) -> None:
+        """末尾ノードを取り消し、current_id を親に戻す"""
+        if not self._nodes:
+            return
+        node = self._nodes.pop()
+        self._current_id = node.parent_id
+
     def to_dict(self) -> dict:
         return {
             "tree_id": self._tree_id,

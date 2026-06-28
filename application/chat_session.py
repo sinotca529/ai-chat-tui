@@ -51,6 +51,9 @@ class ChatSession:
         self._tree.set_current(asst_id)
         self._store.save(self._tree)
 
+    def rollback_last_user_message(self) -> None:
+        self._tree.rollback()
+
     def navigate_to(self, node_id: int) -> None:
         self._tree.set_current(node_id)
 

@@ -27,6 +27,8 @@ class ChatApp:
         self._chat_view = ChatView()
         self._tree_overlay = TreeSelectOverlay()
         self._model_overlay = ModelSelectOverlay()
+        self._stream_task: asyncio.Task | None = None
+        self._pending_message: str = ""
 
         self._input_area = TextArea(
             multiline=True,
@@ -97,9 +99,15 @@ class ChatApp:
         is_model_overlay = Condition(lambda: self._mode == "model_overlay")
         is_any_overlay = is_tree_overlay | is_model_overlay
         is_tree_confirming = Condition(lambda: self._tree_overlay.is_confirming())
-        not_streaming = Condition(lambda: not self._streaming)
+        is_streaming = Condition(lambda: self._streaming)
+        not_streaming = ~is_streaming
 
-        @kb.add("c-c")
+        @kb.add("c-c", filter=is_streaming)
+        def _cancel_stream(event):
+            if self._stream_task and not self._stream_task.done():
+                self._stream_task.cancel()
+
+        @kb.add("c-c", filter=~is_streaming)
         @kb.add("c-q")
         def _quit(event):
             event.app.exit()
@@ -136,14 +144,17 @@ class ChatApp:
             if self._branch_target_id is not None:
                 self._session.navigate_to(self._branch_target_id)
                 self._branch_target_id = None
+            self._pending_message = msg
             self._chat_view.start_streaming(msg)
-            asyncio.ensure_future(self._do_stream(msg))
+            self._stream_task = asyncio.ensure_future(self._do_stream(msg))
 
         @kb.add("tab", filter=is_input)
         def _to_browse(event):
             self._mode = "browse"
             self._chat_view.set_browse_mode(True)
-            event.app.layout.focus(self._chat_view.control)
+            win = self._chat_view.selected_content_window()
+            if win:
+                event.app.layout.focus(win)
 
         @kb.add("escape", filter=is_input)
         def _cancel_branch(event):
@@ -315,10 +326,15 @@ class ChatApp:
             self._refresh_chat_view()
             if not self._session.title:
                 asyncio.ensure_future(self._auto_title())
+        except asyncio.CancelledError:
+            self._session.rollback_last_user_message()
+            self._input_area.text = self._pending_message
+            self._refresh_chat_view()
         except Exception as e:
             self._chat_view.append_chunk(f"\n[エラー: {e}]")
         finally:
             self._streaming = False
+            self._stream_task = None
             self._app.invalidate()
             self._app.layout.focus(self._input_area)
 
