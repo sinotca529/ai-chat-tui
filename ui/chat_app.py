@@ -1,121 +1,263 @@
 import asyncio
-from ui.tree_select_window import TreeSelectWindow
-from ui.thread_view import TreeView
-from textual.app import App, ComposeResult
-from textual.events import Paste
-from textual.widgets import Header, Footer, TextArea
-from chat_tree_store import ChatTreeStore
-from api_handler import ApiHandler
-from chat_tree import ChatTree
-from chat_tree_handler import ChatTreeHandler
-from util.util import logger
+
+from prompt_toolkit import Application
+from prompt_toolkit.filters import Condition
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout import Layout, HSplit, FloatContainer, Float, Window
+from prompt_toolkit.layout.containers import ConditionalContainer
+from prompt_toolkit.styles import merge_styles
+from prompt_toolkit.styles.pygments import style_from_pygments_cls
+from prompt_toolkit.widgets import TextArea
+from pygments.styles import get_style_by_name
+
+from application.chat_session import ChatSession
+from ui.chat_view import ChatView
+from ui.tree_select_overlay import TreeSelectOverlay
+from ui.model_select_overlay import ModelSelectOverlay
 
 
-class ChatApp(App):
-    CSS_PATH = "../tcss/chat_app.tcss"
+class ChatApp:
+    def __init__(self, session: ChatSession) -> None:
+        self._session = session
+        self._mode = "input"  # "input" | "browse" | "tree_overlay" | "model_overlay"
+        self._streaming = False
+        self._branch_target_id: int | None = None
 
-    def __init__(
-        self,
-        base_url: str,
-        api_key: str,
-        model: str,
-        save_dir: str
-    ):
-        super().__init__()
-        self.chat_tree_sotre = ChatTreeStore(save_dir)
-        self.api_handler = ApiHandler(base_url, api_key, model)
-        self.tree_handler = ChatTreeHandler(ChatTree.new(), self.api_handler)
+        self._chat_view = ChatView()
+        self._tree_overlay = TreeSelectOverlay()
+        self._model_overlay = ModelSelectOverlay()
 
-    def compose(self) -> ComposeResult:
-        """ウィジェットを配置."""
-        yield Header()
-        yield TreeView(self.chat, id="chat-container")
-        yield TextArea(id="input-box")
-        yield Footer()
-
-    async def on_mount(self) -> None:
-        """アプリ起動時の初期化."""
-        self.set_focus(self.query_one("#input-box", TextArea))
-
-    async def on_key(self, event) -> None:
-        match event.key:
-            case "ctrl+c":
-                self.exit()
-
-            case "ctrl+t":
-                self._display_tree_list()
-
-            case "ctrl+d":
-                user_msg = await self.take_input_value()
-                await self.chat(user_msg)
-
-    def on_paste(self, event: Paste) -> None:
-        """クリップボードの内容をテキストエリアに貼り付け"""
-        with open('log', 'w') as f:
-            print(event.text, file=f)
-        input_box = self.query_one("#input-box", TextArea)
-        input_box.text += event.text
-
-    async def take_input_value(self) -> str:
-        input_box = self.query_one("#input-box", TextArea)
-        user_message = input_box.text
-        input_box.text = ""
-        input_box.refresh()
-        await asyncio.sleep(0.01)
-        return user_message
-
-    async def chat(self, user_msg: str, thread_id: int = None) -> None:
-        """チャットをする。
-        user_msg:  メッセージ
-        thread_id: 起点となるスレッド、つまり返信先。省略した場合、現在のスレッドの末尾に返信
-        """
-        if not user_msg:
-            return
-
-        user_msg = user_msg.strip()
-        if not user_msg:
-            return
-
-        # スレッドの選択
-        if thread_id is not None:
-            self.tree_handler.set_thread_id(thread_id)
-            logger(__name__).info(self.tree_handler.get_thread_id())
-            await self._display_current_thread()
-
-        thread_id = self.tree_handler.get_thread_id()
-
-        # 兄弟ノードの取得
-        siblings = self.tree_handler.get_children(thread_id)
-
-        # チャットを実施
-        user_msg_id, resp_stream = self.tree_handler.send_message(user_msg)
-
-        # Update chat view
-        thread = self.query_one("#chat-container", TreeView)
-        await thread.add_user_message(user_msg, user_msg_id, siblings)
-        await thread.add_assistant_message(resp_stream, user_msg_id + 1)
-
-        # Save chat log
-        self.chat_tree_sotre.save(self.tree_handler.get_tree())
-
-    def _display_tree_list(self):
-        """ツリーリストをフローティングスクリーンで表示."""
-        tree_ids = self.chat_tree_sotre.tree_id_list()
-        self.push_screen(
-            TreeSelectWindow(tree_ids),
-            self._display_default_thread
+        self._input_area = TextArea(
+            multiline=True,
+            prompt="  > ",
+            height=8,
+            scrollbar=False,
+            wrap_lines=True,
         )
 
-    async def _display_current_thread(self):
-        thread_view = self.query_one("#chat-container", TreeView)
-        await thread_view.render_thread(self.tree_handler.current_thread())
+        self._app = self._build_app()
+        self._refresh_chat_view()
 
-    async def _display_default_thread(self, tree_id: str):
-        """指定したツリーのデフォルトのスレッドを表示."""
-        thread_view = self.query_one("#chat-container", TreeView)
-        self.tree_handler = ChatTreeHandler(
-            self.chat_tree_sotre.load(tree_id),
-            self.api_handler
+    def _build_app(self) -> Application:
+        kb = self._build_keybindings()
+        layout = self._build_layout()
+        style = merge_styles([
+            style_from_pygments_cls(get_style_by_name("monokai")),
+        ])
+        return Application(
+            layout=layout,
+            key_bindings=kb,
+            full_screen=True,
+            mouse_support=False,
+            style=style,
         )
 
-        await thread_view.render_thread(self.tree_handler.current_thread())
+    def _build_layout(self) -> Layout:
+        is_tree_overlay = Condition(lambda: self._mode == "tree_overlay")
+        is_model_overlay = Condition(lambda: self._mode == "model_overlay")
+
+        root = FloatContainer(
+            content=HSplit([
+                self._chat_view.window,
+                Window(height=1, char="─"),
+                self._input_area,
+            ]),
+            floats=[
+                Float(
+                    content=ConditionalContainer(
+                        content=self._tree_overlay.window,
+                        filter=is_tree_overlay,
+                    ),
+                    xcursor=False,
+                    ycursor=False,
+                ),
+                Float(
+                    content=ConditionalContainer(
+                        content=self._model_overlay.window,
+                        filter=is_model_overlay,
+                    ),
+                    xcursor=False,
+                    ycursor=False,
+                ),
+            ],
+        )
+
+        return Layout(root, focused_element=self._input_area)
+
+    def _build_keybindings(self) -> KeyBindings:
+        kb = KeyBindings()
+
+        is_input = Condition(lambda: self._mode == "input")
+        is_browse = Condition(lambda: self._mode == "browse")
+        is_tree_overlay = Condition(lambda: self._mode == "tree_overlay")
+        is_model_overlay = Condition(lambda: self._mode == "model_overlay")
+        is_any_overlay = is_tree_overlay | is_model_overlay
+        not_streaming = Condition(lambda: not self._streaming)
+
+        @kb.add("c-c")
+        @kb.add("c-q")
+        def _quit(event):
+            event.app.exit()
+
+        @kb.add("c-d", filter=is_input & not_streaming)
+        def _send(event):
+            msg = self._input_area.text.strip()
+            if not msg:
+                return
+            self._input_area.text = ""
+            self._streaming = True
+            if self._branch_target_id is not None:
+                self._session.navigate_to(self._branch_target_id)
+                self._branch_target_id = None
+            self._chat_view.start_streaming(msg)
+            asyncio.ensure_future(self._do_stream(msg))
+
+        @kb.add("tab", filter=is_input)
+        def _to_browse(event):
+            self._mode = "browse"
+            self._chat_view.set_browse_mode(True)
+            event.app.layout.focus(self._chat_view.control)
+
+        @kb.add("tab", filter=is_browse)
+        @kb.add("escape", filter=is_browse)
+        def _to_input(event):
+            self._mode = "input"
+            self._chat_view.set_browse_mode(False)
+            event.app.layout.focus(self._input_area)
+
+        @kb.add("up", filter=is_browse)
+        def _browse_up(event):
+            self._chat_view.move_cursor_up()
+
+        @kb.add("down", filter=is_browse)
+        def _browse_down(event):
+            self._chat_view.move_cursor_down()
+
+        @kb.add("left", filter=is_browse)
+        def _sibling_prev(event):
+            self._switch_sibling(-1)
+
+        @kb.add("right", filter=is_browse)
+        def _sibling_next(event):
+            self._switch_sibling(1)
+
+        @kb.add("e", filter=is_browse & not_streaming)
+        def _branch_edit(event):
+            entry = self._chat_view.selected_entry()
+            if entry is None or entry.node.role.value != "user":
+                return
+            self._input_area.text = entry.node.content
+            self._branch_target_id = entry.node.parent_id
+            self._mode = "input"
+            self._chat_view.set_browse_mode(False)
+            event.app.layout.focus(self._input_area)
+
+        # ツリー選択オーバーレイ
+        @kb.add("c-t", filter=~is_any_overlay)
+        def _open_tree_overlay(event):
+            ids = self._session.list_tree_ids()
+            self._tree_overlay.load(ids)
+            self._mode = "tree_overlay"
+            event.app.layout.focus(self._tree_overlay.control)
+
+        @kb.add("c-t", filter=is_tree_overlay)
+        def _close_tree_overlay(event):
+            self._mode = "input"
+            event.app.layout.focus(self._input_area)
+
+        @kb.add("up", filter=is_tree_overlay)
+        def _tree_up(event):
+            self._tree_overlay.move_up()
+
+        @kb.add("down", filter=is_tree_overlay)
+        def _tree_down(event):
+            self._tree_overlay.move_down()
+
+        @kb.add("enter", filter=is_tree_overlay)
+        def _tree_select(event):
+            tree_id = self._tree_overlay.selected_id()
+            if tree_id is None:
+                self._session.new_tree()
+            else:
+                self._session.load_tree(tree_id)
+            self._branch_target_id = None
+            self._mode = "input"
+            self._chat_view.set_browse_mode(False)
+            self._refresh_chat_view()
+            event.app.layout.focus(self._input_area)
+
+        # モデル選択オーバーレイ
+        @kb.add("c-o", filter=~is_any_overlay)
+        def _open_model_overlay(event):
+            self._model_overlay.start_loading(self._session.current_model)
+            self._mode = "model_overlay"
+            event.app.layout.focus(self._model_overlay.control)
+            asyncio.ensure_future(self._load_models())
+
+        @kb.add("c-o", filter=is_model_overlay)
+        def _close_model_overlay(event):
+            self._mode = "input"
+            event.app.layout.focus(self._input_area)
+
+        @kb.add("up", filter=is_model_overlay)
+        def _model_up(event):
+            self._model_overlay.move_up()
+
+        @kb.add("down", filter=is_model_overlay)
+        def _model_down(event):
+            self._model_overlay.move_down()
+
+        @kb.add("enter", filter=is_model_overlay)
+        def _model_select(event):
+            model_id = self._model_overlay.selected_model()
+            if model_id is not None:
+                self._session.set_model(model_id)
+            self._mode = "input"
+            event.app.layout.focus(self._input_area)
+
+        return kb
+
+    def _switch_sibling(self, direction: int) -> None:
+        entry = self._chat_view.selected_entry()
+        if entry is None:
+            return
+        siblings = self._session.siblings_of(entry.node.id)
+        if len(siblings) <= 1:
+            return
+        current_pos = siblings.index(entry.node.id)
+        next_sibling_id = siblings[(current_pos + direction) % len(siblings)]
+        self._session.navigate_to_branch_end(next_sibling_id)
+        self._refresh_chat_view()
+        entries = self._chat_view._entries
+        for i, e in enumerate(entries):
+            if e.node.id == next_sibling_id:
+                self._chat_view._cursor_index = i
+                break
+
+    def _refresh_chat_view(self) -> None:
+        entries = self._session.current_thread()
+        self._chat_view.update(entries)
+
+    async def _do_stream(self, msg: str) -> None:
+        try:
+            async for chunk in self._session.send_message(msg):
+                self._chat_view.append_chunk(chunk)
+                self._app.invalidate()
+            self._refresh_chat_view()
+        except Exception as e:
+            self._chat_view.append_chunk(f"\n[エラー: {e}]")
+        finally:
+            self._streaming = False
+            self._app.invalidate()
+
+    async def _load_models(self) -> None:
+        try:
+            models = await self._session.list_models()
+            self._model_overlay.load(models, self._session.current_model)
+        except Exception as e:
+            self._model_overlay.set_error(str(e))
+        finally:
+            self._app.invalidate()
+
+    async def run(self) -> None:
+        await self._app.run_async()

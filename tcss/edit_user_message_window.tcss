@@ -1,8 +1,0 @@
-EditUserMessageWindow {
-  align: center middle;
-
-  VerticalGroup {
-    width: 60%;
-    height: 60%;
-  }
-}
