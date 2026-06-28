@@ -24,7 +24,10 @@ class ApiHandler:
             messages=prompt,
             stream=False,
         )
-        return response.choices[0].message.content.strip()
+        title = response.choices[0].message.content.strip()
+        if title.startswith("「") and title.endswith("」"):
+            title = title[1:-1]
+        return title
 
     async def list_models(self) -> list[str]:
         response = await self._client.models.list()
