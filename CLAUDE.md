@@ -47,7 +47,7 @@ UI 層 → アプリケーション層 → ドメイン層
 **ドメイン層 (`domain/`)**
 - `role.py` — `Role` (StrEnum: USER / ASSISTANT)
 - `node.py` — `Node` (frozen dataclass: id, role, content, parent_id)
-- `chat_tree.py` — `ChatTree`: append-only ツリー。子・兄弟は `parent_id` から導出。
+- `chat_tree.py` — `ChatTree`: append-only ツリー。子・兄弟は `parent_id` から導出。`title` / `system_prompt` フィールドを持つ。`rollback()` で末尾ノードを pop し `current_id` を親に戻す。
 
 **アプリケーション層 (`application/`)**
 - `thread_entry.py` — `ThreadEntry` (frozen dataclass: node + sibling_index + sibling_count)
@@ -63,19 +63,24 @@ UI 層 → アプリケーション層 → ドメイン層
 - `highlight.py` — コードブロックのパース (`iter_content`) と Pygments によるハイライト (`highlight_code`)。
 - `tree_select_overlay.py` — `TreeSelectOverlay`: 保存済みツリーの選択・削除 UI。
 - `model_select_overlay.py` — `ModelSelectOverlay`: モデル一覧の選択 UI（非同期ロード）。
+- `system_prompt_overlay.py` — `SystemPromptOverlay`: TextArea によるシステムプロンプト編集 UI。
+- `help_overlay.py` — `HelpOverlay`: キーバインド一覧の静的表示。
 
 ## Key design details
 
 **ブランチ構造**: `Node` は `parent_id` のみ持つ。子・兄弟は全ノードをスキャンして導出（Git のコミットと同じ設計）。
 
-**モード**: `input` / `browse` / `tree_overlay` / `model_overlay` の 4 状態。`Condition` フィルタでキーバインドを分岐する。
+**モード**: `input` / `browse` / `tree_overlay` / `model_overlay` / `system_overlay` / `help_overlay` の 6 状態。`Condition` フィルタでキーバインドを分岐する。
 
 **キーバインド**:
 - `Ctrl+D` — 送信
+- `Ctrl+C` — ストリーミング中はキャンセル、それ以外は終了
 - `Tab` / `Esc` — input ↔ browse 切り替え
 - `Ctrl+T` — ツリー選択オーバーレイをトグル
 - `Ctrl+O` — モデル選択オーバーレイをトグル
-- browse: `↑↓`/`jk` メッセージ移動、`←→`/`hl` 兄弟ブランチ切り替え、`e` 分岐編集
+- `Ctrl+P` — システムプロンプト編集オーバーレイをトグル
+- `?` — キーバインド一覧オーバーレイをトグル
+- browse: `↑↓`/`jk` メッセージ移動、`←→`/`hl` 兄弟ブランチ切り替え、`e` 分岐編集、`Ctrl+E`/`Ctrl+Y` 1 行スクロール下/上
 - tree overlay: `↑↓` カーソル移動、`Enter` 選択、`d` 削除確認、`y`/`n` 削除確定/キャンセル
 - input: `Ctrl+A/E` 行頭/行末、`Ctrl+K/U` 行削除
 
