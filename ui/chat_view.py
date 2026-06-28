@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.layout.controls import FormattedTextControl
@@ -8,9 +9,31 @@ from domain.role import Role
 from ui.highlight import iter_content, highlight_code
 
 
+@dataclass(frozen=True)
+class _RowEntry:
+    """行レンダリング専用の表示データ。domain オブジェクトに依存しない。"""
+    role: Role
+    content: str
+    sibling_index: int
+    sibling_count: int
+
+    @classmethod
+    def from_thread_entry(cls, e: ThreadEntry) -> "_RowEntry":
+        return cls(
+            role=e.node.role,
+            content=e.node.content,
+            sibling_index=e.sibling_index,
+            sibling_count=e.sibling_count,
+        )
+
+
 class ChatView:
     def __init__(self) -> None:
+        # カーソル操作用（本物のエントリーのみ）
         self._entries: list[ThreadEntry] = []
+        # 表示行用（ストリーミング中はユーザーメッセージの仮行を含む）
+        self._row_entries: list[_RowEntry] = []
+
         self._streaming_text: str = ""
         self._cursor_index: int = -1
         self._browse_mode: bool = False
@@ -48,25 +71,25 @@ class ChatView:
 
     def update(self, entries: list[ThreadEntry]) -> None:
         self._entries = entries
+        self._row_entries = [_RowEntry.from_thread_entry(e) for e in entries]
         self._streaming_text = ""
         self._is_streaming = False
         self._rows = []
         self._content_windows = []
-        for i, entry in enumerate(entries):
-            row, content_win = self._build_row(i, entry)
+        for i, row_entry in enumerate(self._row_entries):
+            row, content_win = self._build_row(i, row_entry)
             self._rows.append(row)
             self._content_windows.append(content_win)
         if self._cursor_index >= len(entries):
             self._cursor_index = -1
 
     def start_streaming(self, user_msg: str) -> None:
-        from domain.node import Node
-        fake_node = Node(id=-1, role=Role.USER, content=user_msg, parent_id=None)
-        fake_entry = ThreadEntry(node=fake_node, sibling_index=1, sibling_count=1)
-        row, content_win = self._build_row(len(self._rows), fake_entry)
+        pending = _RowEntry(role=Role.USER, content=user_msg, sibling_index=1, sibling_count=1)
+        row, content_win = self._build_row(len(self._rows), pending)
         self._rows.append(row)
         self._content_windows.append(content_win)
-        self._entries = self._entries + [fake_entry]
+        self._row_entries = self._row_entries + [pending]
+        # _entries は変更しない（本物のエントリーのみ保持）
         self._streaming_text = ""
         self._is_streaming = True
 
@@ -132,12 +155,12 @@ class ChatView:
 
     # ── 行構築 ────────────────────────────────────────────────────────────────
 
-    def _build_row(self, index: int, entry: ThreadEntry) -> tuple[VSplit | Window, Window]:
+    def _build_row(self, index: int, entry: _RowEntry) -> tuple[VSplit | Window, Window]:
         content_ctrl = FormattedTextControl(
             text=lambda e=entry, i=index: self._render_entry(e, i),
             focusable=True,
         )
-        role = entry.node.role
+        role = entry.role
         content_win = Window(
             content=content_ctrl,
             wrap_lines=True,
@@ -166,19 +189,19 @@ class ChatView:
 
     # ── レンダリング ──────────────────────────────────────────────────────────
 
-    def _render_entry(self, entry: ThreadEntry, index: int) -> StyleAndTextTuples:
+    def _render_entry(self, entry: _RowEntry, index: int) -> StyleAndTextTuples:
         result: StyleAndTextTuples = []
         is_selected = self._browse_mode and index == self._cursor_index
 
-        if entry.node.role == Role.USER:
+        if entry.role == Role.USER:
             role_style = "bold fg:ansiwhite" if is_selected else "bold fg:ansibrightcyan"
             text_style = "fg:ansiwhite"
         else:
             role_style = "bold fg:ansiwhite" if is_selected else "bold fg:ansibrightgreen"
             text_style = "fg:ansiwhite" if is_selected else ""
 
-        result.append((role_style, ">" if entry.node.role == Role.USER else "*"))
-        self._render_content(result, entry.node.content, text_style)
+        result.append((role_style, ">" if entry.role == Role.USER else "*"))
+        self._render_content(result, entry.content, text_style)
         result.append(("", "\n"))
         return result
 
