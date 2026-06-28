@@ -16,6 +16,7 @@ from ui.chat_view import ChatView
 from ui.tree_select_overlay import TreeSelectOverlay
 from ui.model_select_overlay import ModelSelectOverlay
 from ui.system_prompt_overlay import SystemPromptOverlay
+from ui.help_overlay import HelpOverlay
 
 
 class ChatApp:
@@ -29,6 +30,7 @@ class ChatApp:
         self._tree_overlay = TreeSelectOverlay()
         self._model_overlay = ModelSelectOverlay()
         self._system_overlay = SystemPromptOverlay()
+        self._help_overlay = HelpOverlay()
         self._stream_task: asyncio.Task | None = None
         self._pending_message: str = ""
 
@@ -64,6 +66,7 @@ class ChatApp:
         is_tree_overlay = Condition(lambda: self._mode == "tree_overlay")
         is_model_overlay = Condition(lambda: self._mode == "model_overlay")
         is_system_overlay = Condition(lambda: self._mode == "system_overlay")
+        is_help_overlay = Condition(lambda: self._mode == "help_overlay")
 
         root = FloatContainer(
             content=HSplit([
@@ -96,6 +99,14 @@ class ChatApp:
                     xcursor=False,
                     ycursor=False,
                 ),
+                Float(
+                    content=ConditionalContainer(
+                        content=self._help_overlay.window,
+                        filter=is_help_overlay,
+                    ),
+                    xcursor=False,
+                    ycursor=False,
+                ),
             ],
         )
 
@@ -109,10 +120,26 @@ class ChatApp:
         is_tree_overlay = Condition(lambda: self._mode == "tree_overlay")
         is_model_overlay = Condition(lambda: self._mode == "model_overlay")
         is_system_overlay = Condition(lambda: self._mode == "system_overlay")
-        is_any_overlay = is_tree_overlay | is_model_overlay | is_system_overlay
+        is_help_overlay = Condition(lambda: self._mode == "help_overlay")
+        is_any_overlay = is_tree_overlay | is_model_overlay | is_system_overlay | is_help_overlay
         is_tree_confirming = Condition(lambda: self._tree_overlay.is_confirming())
         is_streaming = Condition(lambda: self._streaming)
         not_streaming = ~is_streaming
+
+        @kb.add("?", filter=~is_any_overlay)
+        @kb.add("?", filter=is_help_overlay)
+        def _toggle_help(event):
+            if self._mode == "help_overlay":
+                self._mode = "input"
+                event.app.layout.focus(self._input_area)
+            else:
+                self._mode = "help_overlay"
+                event.app.layout.focus(self._help_overlay.window.body)
+
+        @kb.add("escape", filter=is_help_overlay)
+        def _close_help(event):
+            self._mode = "input"
+            event.app.layout.focus(self._input_area)
 
         @kb.add("c-c", filter=is_streaming)
         def _cancel_stream(event):
