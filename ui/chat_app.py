@@ -158,18 +158,28 @@ class ChatApp:
             event.app.layout.focus(self._input_area)
 
         @kb.add("up", filter=is_browse)
+        @kb.add("k", filter=is_browse)
         def _browse_up(event):
             self._chat_view.move_cursor_up()
+            win = self._chat_view.selected_content_window()
+            if win:
+                event.app.layout.focus(win)
 
         @kb.add("down", filter=is_browse)
+        @kb.add("j", filter=is_browse)
         def _browse_down(event):
             self._chat_view.move_cursor_down()
+            win = self._chat_view.selected_content_window()
+            if win:
+                event.app.layout.focus(win)
 
         @kb.add("left", filter=is_browse)
+        @kb.add("h", filter=is_browse)
         def _sibling_prev(event):
             self._switch_sibling(-1)
 
         @kb.add("right", filter=is_browse)
+        @kb.add("l", filter=is_browse)
         def _sibling_next(event):
             self._switch_sibling(1)
 
