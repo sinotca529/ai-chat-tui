@@ -10,11 +10,13 @@ class ChatTree:
         nodes: list[Node] | None = None,
         current_id: int | None = None,
         title: str = "",
+        system_prompt: str = "",
     ) -> None:
         self._tree_id = tree_id or str(uuid.uuid4())
         self._nodes: list[Node] = nodes or []
         self._current_id: int | None = current_id
         self._title: str = title
+        self._system_prompt: str = system_prompt
 
     @property
     def tree_id(self) -> str:
@@ -26,6 +28,13 @@ class ChatTree:
 
     def set_title(self, title: str) -> None:
         self._title = title
+
+    @property
+    def system_prompt(self) -> str:
+        return self._system_prompt
+
+    def set_system_prompt(self, prompt: str) -> None:
+        self._system_prompt = prompt
 
     @property
     def current_id(self) -> int | None:
@@ -72,6 +81,7 @@ class ChatTree:
         return {
             "tree_id": self._tree_id,
             "title": self._title,
+            "system_prompt": self._system_prompt,
             "current_id": self._current_id,
             "nodes": [
                 {
@@ -100,4 +110,5 @@ class ChatTree:
             nodes=nodes,
             current_id=data.get("current_id"),
             title=data.get("title", ""),
+            system_prompt=data.get("system_prompt", ""),
         )

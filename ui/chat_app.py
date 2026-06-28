@@ -15,6 +15,7 @@ from application.chat_session import ChatSession
 from ui.chat_view import ChatView
 from ui.tree_select_overlay import TreeSelectOverlay
 from ui.model_select_overlay import ModelSelectOverlay
+from ui.system_prompt_overlay import SystemPromptOverlay
 
 
 class ChatApp:
@@ -27,6 +28,7 @@ class ChatApp:
         self._chat_view = ChatView()
         self._tree_overlay = TreeSelectOverlay()
         self._model_overlay = ModelSelectOverlay()
+        self._system_overlay = SystemPromptOverlay()
         self._stream_task: asyncio.Task | None = None
         self._pending_message: str = ""
 
@@ -61,6 +63,7 @@ class ChatApp:
     def _build_layout(self) -> Layout:
         is_tree_overlay = Condition(lambda: self._mode == "tree_overlay")
         is_model_overlay = Condition(lambda: self._mode == "model_overlay")
+        is_system_overlay = Condition(lambda: self._mode == "system_overlay")
 
         root = FloatContainer(
             content=HSplit([
@@ -85,6 +88,14 @@ class ChatApp:
                     xcursor=False,
                     ycursor=False,
                 ),
+                Float(
+                    content=ConditionalContainer(
+                        content=self._system_overlay.window,
+                        filter=is_system_overlay,
+                    ),
+                    xcursor=False,
+                    ycursor=False,
+                ),
             ],
         )
 
@@ -97,7 +108,8 @@ class ChatApp:
         is_browse = Condition(lambda: self._mode == "browse")
         is_tree_overlay = Condition(lambda: self._mode == "tree_overlay")
         is_model_overlay = Condition(lambda: self._mode == "model_overlay")
-        is_any_overlay = is_tree_overlay | is_model_overlay
+        is_system_overlay = Condition(lambda: self._mode == "system_overlay")
+        is_any_overlay = is_tree_overlay | is_model_overlay | is_system_overlay
         is_tree_confirming = Condition(lambda: self._tree_overlay.is_confirming())
         is_streaming = Condition(lambda: self._streaming)
         not_streaming = ~is_streaming
@@ -259,6 +271,25 @@ class ChatApp:
         @kb.add("escape", filter=is_tree_confirming)
         def _tree_delete_cancel(event):
             self._tree_overlay.cancel_confirm()
+
+        # システムプロンプトオーバーレイ
+        @kb.add("c-p", filter=~is_any_overlay)
+        def _open_system_overlay(event):
+            self._system_overlay.load(self._session.system_prompt)
+            self._mode = "system_overlay"
+            event.app.layout.focus(self._system_overlay.control)
+
+        @kb.add("escape", filter=is_system_overlay)
+        @kb.add("c-p", filter=is_system_overlay)
+        def _close_system_overlay(event):
+            self._mode = "input"
+            event.app.layout.focus(self._input_area)
+
+        @kb.add("c-d", filter=is_system_overlay)
+        def _save_system_prompt(event):
+            self._session.set_system_prompt(self._system_overlay.text.strip())
+            self._mode = "input"
+            event.app.layout.focus(self._input_area)
 
         # モデル選択オーバーレイ
         @kb.add("c-o", filter=~is_any_overlay)

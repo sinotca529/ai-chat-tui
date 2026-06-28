@@ -7,10 +7,17 @@ from infrastructure.chat_tree_store import ChatTreeStore
 
 
 class ChatSession:
-    def __init__(self, tree: ChatTree, api: ApiHandler, store: ChatTreeStore) -> None:
+    def __init__(
+        self,
+        tree: ChatTree,
+        api: ApiHandler,
+        store: ChatTreeStore,
+        default_system_prompt: str = "",
+    ) -> None:
         self._tree = tree
         self._api = api
         self._store = store
+        self._default_system_prompt = default_system_prompt
 
     @property
     def tree_id(self) -> str:
@@ -34,11 +41,27 @@ class ChatSession:
             )
         return result
 
+    @property
+    def system_prompt(self) -> str:
+        return self._tree.system_prompt
+
+    @property
+    def effective_system_prompt(self) -> str:
+        return self._tree.system_prompt or self._default_system_prompt
+
+    def set_system_prompt(self, prompt: str) -> None:
+        self._tree.set_system_prompt(prompt)
+        if self._tree.current_id is not None:
+            self._store.save(self._tree)
+
     async def send_message(self, msg: str) -> AsyncIterator[str]:
+        effective = self.effective_system_prompt
         thread_messages = [
             {"role": str(e.node.role), "content": e.node.content}
             for e in self.current_thread()
         ]
+        if effective:
+            thread_messages = [{"role": "system", "content": effective}] + thread_messages
         user_id = self._tree.insert(self._tree.current_id, Role.USER, msg)
         self._tree.set_current(user_id)
 

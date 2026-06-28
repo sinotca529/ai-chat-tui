@@ -4,3 +4,6 @@ model = "dsasai/llama3-elyza-jp-8b:latest"
 
 [storage]
 save_dir = "./trees"
+
+[system]
+prompt = ""

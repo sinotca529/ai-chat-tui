@@ -24,10 +24,17 @@ async def main() -> None:
     model = config["api"]["model"]
     save_dir = config["storage"]["save_dir"]
 
+    default_system_prompt = config.get("system", {}).get("prompt", "")
+
     store = ChatTreeStore(save_dir)
     api = ApiHandler(url=url, api_key=api_key, model=model)
     tree = store.new_tree()
-    session = ChatSession(tree=tree, api=api, store=store)
+    session = ChatSession(
+        tree=tree,
+        api=api,
+        store=store,
+        default_system_prompt=default_system_prompt,
+    )
 
     app = ChatApp(session)
     await app.run()
