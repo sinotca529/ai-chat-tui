@@ -1,6 +1,6 @@
 [api]
 url   = "http://localhost:11434/v1"
-model = "dsasai/llama3-elyza-jp-8b:latest"
+model = "your-model-name"
 
 [storage]
 save_dir = "./trees"
