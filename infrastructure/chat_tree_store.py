@@ -35,5 +35,10 @@ class ChatTreeStore:
             result.append((tree_id, title))
         return sorted(result, key=lambda x: x[0])
 
+    def delete(self, tree_id: str) -> None:
+        path = os.path.join(self._save_dir, f"{tree_id}.json")
+        if os.path.exists(path):
+            os.remove(path)
+
     def new_tree(self) -> ChatTree:
         return ChatTree()

@@ -84,6 +84,14 @@ class ChatSession:
         self.set_title(title)
         return title
 
+    def delete_tree(self, tree_id: str) -> bool:
+        """ツリーを削除する。現在のツリーを削除した場合は新規ツリーに切り替えて True を返す"""
+        is_current = tree_id == self._tree.tree_id
+        self._store.delete(tree_id)
+        if is_current:
+            self._tree = self._store.new_tree()
+        return is_current
+
     def list_trees(self) -> list[tuple[str, str]]:
         return self._store.list_trees()
 

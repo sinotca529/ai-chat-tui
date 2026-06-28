@@ -96,6 +96,7 @@ class ChatApp:
         is_tree_overlay = Condition(lambda: self._mode == "tree_overlay")
         is_model_overlay = Condition(lambda: self._mode == "model_overlay")
         is_any_overlay = is_tree_overlay | is_model_overlay
+        is_tree_confirming = Condition(lambda: self._tree_overlay.is_confirming())
         not_streaming = Condition(lambda: not self._streaming)
 
         @kb.add("c-c")
@@ -215,7 +216,7 @@ class ChatApp:
         def _tree_down(event):
             self._tree_overlay.move_down()
 
-        @kb.add("enter", filter=is_tree_overlay)
+        @kb.add("enter", filter=is_tree_overlay & ~is_tree_confirming)
         def _tree_select(event):
             tree_id = self._tree_overlay.selected_id()
             if tree_id is None:
@@ -227,6 +228,25 @@ class ChatApp:
             self._chat_view.set_browse_mode(False)
             self._refresh_chat_view()
             event.app.layout.focus(self._input_area)
+
+        @kb.add("d", filter=is_tree_overlay & ~is_tree_confirming)
+        def _tree_delete_start(event):
+            if self._tree_overlay.selected_id() is not None:
+                self._tree_overlay.start_confirm()
+
+        @kb.add("y", filter=is_tree_confirming)
+        def _tree_delete_confirm(event):
+            tree_id = self._tree_overlay.selected_id()
+            if tree_id is not None:
+                switched = self._session.delete_tree(tree_id)
+                if switched:
+                    self._refresh_chat_view()
+            self._tree_overlay.load(self._session.list_trees())
+
+        @kb.add("n", filter=is_tree_confirming)
+        @kb.add("escape", filter=is_tree_confirming)
+        def _tree_delete_cancel(event):
+            self._tree_overlay.cancel_confirm()
 
         # モデル選択オーバーレイ
         @kb.add("c-o", filter=~is_any_overlay)
