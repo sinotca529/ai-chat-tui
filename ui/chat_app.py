@@ -103,6 +103,28 @@ class ChatApp:
         def _quit(event):
             event.app.exit()
 
+        @kb.add("c-a", filter=is_input)
+        def _beginning_of_line(event):
+            buf = event.current_buffer
+            buf.cursor_position += buf.document.get_start_of_line_position(after_whitespace=False)
+
+        @kb.add("c-e", filter=is_input)
+        def _end_of_line(event):
+            buf = event.current_buffer
+            buf.cursor_position += buf.document.get_end_of_line_position()
+
+        @kb.add("c-k", filter=is_input)
+        def _kill_line(event):
+            buf = event.current_buffer
+            pos = buf.document.get_end_of_line_position()
+            buf.delete(count=pos if pos else 1)
+
+        @kb.add("c-u", filter=is_input)
+        def _kill_line_backward(event):
+            buf = event.current_buffer
+            pos = buf.document.get_start_of_line_position(after_whitespace=False)
+            buf.delete_before_cursor(count=-pos)
+
         @kb.add("c-d", filter=is_input & not_streaming)
         def _send(event):
             msg = self._input_area.text.strip()
