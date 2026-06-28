@@ -13,6 +13,7 @@ from prompt_toolkit.widgets import TextArea
 from pygments.styles import get_style_by_name
 
 from application.chat_session import ChatSession
+from domain.role import Role
 from ui.chat_view import ChatView
 from ui.tree_select_overlay import TreeSelectOverlay
 from ui.model_select_overlay import ModelSelectOverlay
@@ -245,7 +246,7 @@ class ChatApp:
         @kb.add("e", filter=is_browse & not_streaming)
         def _branch_edit(event):
             entry = self._chat_view.selected_entry()
-            if entry is None or entry.node.role.value != "user":
+            if entry is None or entry.node.role != Role.USER:
                 return
             self._input_area.text = entry.node.content
             self._branch_target_id = entry.node.parent_id
@@ -370,11 +371,11 @@ class ChatApp:
         self._chat_view.set_cursor_to_node(next_sibling_id)
 
     def _input_prefix(self, lineno: int, wrap_count: int):
-        if lineno == 0 and wrap_count == 0:
-            if self._branch_target_id is not None:
-                return [("fg:ansiyellow bold", "e ")]
-            return [("", "> ")]
-        return [("", "  ")]
+        if lineno > 0 or wrap_count > 0:
+            return [("", "  ")]
+        if self._branch_target_id is not None:
+            return [("fg:ansiyellow bold", "e ")]
+        return [("", "> ")]
 
     def _refresh_chat_view(self) -> None:
         entries = self._session.current_thread()

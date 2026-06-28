@@ -68,8 +68,6 @@ class TreeSelectOverlay:
         result = []
         for i, (tree_id, title) in enumerate(self._trees):
             label = title if title else (tree_id[:16] if tree_id else "[新規作成]")
-            if tree_id == "":
-                label = "[新規作成]"
             text = f" {label} \n"
             result.append(("reverse" if i == self._cursor_index else "", text))
         if not result:

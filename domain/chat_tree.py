@@ -48,7 +48,7 @@ class ChatTree:
         self._nodes.append(Node(id=node_id, role=role, content=content, parent_id=parent_id))
         return node_id
 
-    def thread(self, node_id: int) -> list[Node]:
+    def thread(self, node_id: int | None) -> list[Node]:
         """root から node_id までのパスを返す"""
         if node_id is None:
             return []

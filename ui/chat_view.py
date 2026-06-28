@@ -118,9 +118,7 @@ class ChatView:
                 return
 
     def last_content_window(self) -> Window | None:
-        if self._content_windows:
-            return self._content_windows[-1]
-        return None
+        return self._content_windows[-1] if self._content_windows else None
 
     @property
     def stream_window(self) -> Window:
