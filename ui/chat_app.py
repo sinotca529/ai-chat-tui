@@ -209,6 +209,22 @@ class ChatApp:
             self._chat_view.set_browse_mode(False)
             event.app.layout.focus(self._input_area)
 
+        @kb.add("c-y", filter=is_browse)
+        def _scroll_up(event):
+            event.app.layout.focus(self._input_area)
+            pane = self._chat_view.window
+            pane.vertical_scroll = max(0, pane.vertical_scroll - 1)
+
+        @kb.add("c-e", filter=is_browse)
+        def _scroll_down(event):
+            event.app.layout.focus(self._input_area)
+            pane = self._chat_view.window
+            size = event.app.output.get_size()
+            pane_height = max(1, size.rows - 9)  # separator(1) + input_area(8)
+            content_height = pane.content.preferred_height(size.columns, 10000).preferred
+            max_scroll = max(0, content_height - pane_height)
+            pane.vertical_scroll = min(pane.vertical_scroll + 1, max_scroll)
+
         @kb.add("up", filter=is_browse)
         @kb.add("k", filter=is_browse)
         def _browse_up(event):
