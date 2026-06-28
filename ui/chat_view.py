@@ -1,7 +1,8 @@
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.layout.controls import FormattedTextControl
-from prompt_toolkit.layout import Window
+from prompt_toolkit.layout import Window, VSplit, HSplit, ScrollablePane
+from prompt_toolkit.layout.containers import DynamicContainer
 from application.thread_entry import ThreadEntry
 from domain.role import Role
 from ui.highlight import iter_content, highlight_code
@@ -11,23 +12,50 @@ class ChatView:
     def __init__(self) -> None:
         self._entries: list[ThreadEntry] = []
         self._streaming_text: str = ""
-        self._cursor_index: int = -1  # -1 = 末尾（最新メッセージ）
+        self._cursor_index: int = -1
         self._browse_mode: bool = False
 
-        self.control = FormattedTextControl(
-            text=self._get_formatted_text,
+        self._rows: list = []
+        self._content_windows: list[Window] = []
+        self._is_streaming: bool = False
+
+        self._stream_control = FormattedTextControl(
+            text=self._get_stream_text,
             focusable=True,
-            get_cursor_position=self._get_cursor_pos,
+            get_cursor_position=self._get_stream_cursor_pos,
         )
-        self.window = Window(
-            content=self.control,
+        self._stream_window = Window(
+            content=self._stream_control,
             wrap_lines=True,
             get_line_prefix=lambda lineno, wrap_count: "  " if wrap_count > 0 else "",
+            style="",
+            dont_extend_height=True,
         )
+
+        self.window = ScrollablePane(DynamicContainer(self._get_container))
+
+    # ── コンテナ ──────────────────────────────────────────────────────────────
+
+    def _get_container(self):
+        rows = list(self._rows)
+        if self._is_streaming:
+            rows.append(self._stream_window)
+        if not rows:
+            return Window(content=FormattedTextControl(lambda: [("", "")]))
+        return HSplit(rows)
+
+    # ── 公開 API ──────────────────────────────────────────────────────────────
 
     def update(self, entries: list[ThreadEntry]) -> None:
         self._entries = entries
         self._streaming_text = ""
+        self._is_streaming = False
+        self._rows = []
+        self._content_windows = []
+        for i, entry in enumerate(entries):
+            row, content_win = self._build_row(i, entry)
+            self._rows.append(row)
+            self._content_windows.append(content_win)
         if self._cursor_index >= len(entries):
             self._cursor_index = -1
 
@@ -35,8 +63,12 @@ class ChatView:
         from domain.node import Node
         fake_node = Node(id=-1, role=Role.USER, content=user_msg, parent_id=None)
         fake_entry = ThreadEntry(node=fake_node, sibling_index=1, sibling_count=1)
+        row, content_win = self._build_row(len(self._rows), fake_entry)
+        self._rows.append(row)
+        self._content_windows.append(content_win)
         self._entries = self._entries + [fake_entry]
         self._streaming_text = ""
+        self._is_streaming = True
 
     def append_chunk(self, chunk: str) -> None:
         self._streaming_text += chunk
@@ -50,6 +82,15 @@ class ChatView:
         if 0 <= self._cursor_index < len(self._entries):
             return self._entries[self._cursor_index]
         return None
+
+    def selected_content_window(self) -> Window | None:
+        if 0 <= self._cursor_index < len(self._content_windows):
+            return self._content_windows[self._cursor_index]
+        return None
+
+    @property
+    def stream_window(self) -> Window:
+        return self._stream_window
 
     def move_cursor_up(self) -> None:
         if not self._entries:
@@ -69,57 +110,76 @@ class ChatView:
             else:
                 self._cursor_index = next_idx
 
-    def _entry_start_line(self, index: int) -> int:
-        y = 0
-        for i in range(index):
-            y += self._entries[i].node.content.count("\n") + 1
-        return y
+    # ── 行スタイル ────────────────────────────────────────────────────────────
 
-    def _get_cursor_pos(self) -> Point:
-        if not self._entries:
-            return Point(x=0, y=0)
+    def _row_style(self, index: int, role: Role) -> str:
+        if self._browse_mode and index == self._cursor_index:
+            return "bg:#1e4272"
+        if role == Role.USER:
+            return "bg:#1e1e1e"
+        return ""
 
-        if self._browse_mode and 0 <= self._cursor_index < len(self._entries):
-            return Point(x=0, y=self._entry_start_line(self._cursor_index))
+    # ── 行構築 ────────────────────────────────────────────────────────────────
 
-        total = sum(e.node.content.count("\n") + 1 for e in self._entries)
-        if self._streaming_text:
-            total += self._streaming_text.count("\n") + 1
-        return Point(x=0, y=max(0, total - 1))
+    def _build_row(self, index: int, entry: ThreadEntry) -> tuple:
+        content_ctrl = FormattedTextControl(
+            text=lambda e=entry, i=index: self._render_entry(e, i),
+            focusable=True,
+        )
+        role = entry.node.role
+        content_win = Window(
+            content=content_ctrl,
+            wrap_lines=True,
+            get_line_prefix=lambda lineno, wrap_count: "  " if wrap_count > 0 else "",
+            style=lambda i=index, r=role: self._row_style(i, r),
+            dont_extend_height=True,
+        )
 
-    def _get_formatted_text(self) -> StyleAndTextTuples:
-        result: StyleAndTextTuples = []
-        for i, entry in enumerate(self._entries):
-            is_selected = self._browse_mode and i == self._cursor_index
-
-            if entry.node.role == Role.USER:
-                role_style = "bold fg:ansiwhite" if is_selected else "bold fg:ansibrightcyan"
-                text_style = "fg:ansiwhite" if is_selected else ""
-            else:
-                role_style = "bold fg:ansiwhite" if is_selected else "bold fg:ansibrightgreen"
-                text_style = "fg:ansiwhite" if is_selected else ""
-
-            indicator = (
-                f"  [{entry.sibling_index}/{entry.sibling_count}]"
-                if entry.node.role == Role.USER and entry.sibling_count > 1
-                else ""
+        if role == Role.USER and entry.sibling_count > 1:
+            ind_text = f"[{entry.sibling_index}/{entry.sibling_count}]"
+            ind_ctrl = FormattedTextControl(
+                text=lambda e=entry, i=index: [(
+                    "fg:ansiwhite" if (self._browse_mode and i == self._cursor_index) else "fg:ansiyellow",
+                    f"[{e.sibling_index}/{e.sibling_count}]",
+                )],
             )
-            ind_style = text_style if is_selected else "fg:ansiyellow"
+            ind_win = Window(
+                content=ind_ctrl,
+                width=len(ind_text),
+                dont_extend_width=True,
+                style=lambda i=index, r=role: self._row_style(i, r),
+            )
+            return VSplit([content_win, ind_win]), content_win
 
-            result.append((role_style, ">" if entry.node.role == Role.USER else "*"))
-            self._render_content(result, entry.node.content, text_style)
-            if indicator:
-                result.append((ind_style, indicator))
-            result.append(("", "\n"))
+        return content_win, content_win
 
-        if self._streaming_text:
-            result.append(("bold fg:ansibrightgreen", "*"))
-            result.append(("", f" {self._streaming_text}▌\n"))
+    # ── レンダリング ──────────────────────────────────────────────────────────
 
-        if not result:
-            result.append(("", ""))
+    def _render_entry(self, entry: ThreadEntry, index: int) -> StyleAndTextTuples:
+        result: StyleAndTextTuples = []
+        is_selected = self._browse_mode and index == self._cursor_index
 
+        if entry.node.role == Role.USER:
+            role_style = "bold fg:ansiwhite" if is_selected else "bold fg:ansibrightcyan"
+            text_style = "fg:ansiwhite"
+        else:
+            role_style = "bold fg:ansiwhite" if is_selected else "bold fg:ansibrightgreen"
+            text_style = "fg:ansiwhite" if is_selected else ""
+
+        result.append((role_style, ">" if entry.node.role == Role.USER else "*"))
+        self._render_content(result, entry.node.content, text_style)
+        result.append(("", "\n"))
         return result
+
+    def _get_stream_text(self) -> StyleAndTextTuples:
+        return [
+            ("bold fg:ansibrightgreen", "*"),
+            ("", f" {self._streaming_text}▌\n"),
+        ]
+
+    def _get_stream_cursor_pos(self) -> Point:
+        y = f" {self._streaming_text}▌".count("\n")
+        return Point(x=0, y=y)
 
     def _render_content(
         self,
@@ -127,7 +187,6 @@ class ChatView:
         content: str,
         text_style: str,
     ) -> None:
-        """content をコードブロックを識別しながら result へ追加する"""
         first_segment = True
 
         for is_code, lang, text in iter_content(content):

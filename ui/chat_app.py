@@ -1,6 +1,7 @@
 import asyncio
 
 from prompt_toolkit import Application
+from prompt_toolkit.output.color_depth import ColorDepth
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout, HSplit, FloatContainer, Float, Window
@@ -50,6 +51,7 @@ class ChatApp:
             full_screen=True,
             mouse_support=False,
             style=style,
+            color_depth=ColorDepth.TRUE_COLOR,
         )
         app.ttimeoutlen = 0.05
         return app
