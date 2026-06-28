@@ -1,4 +1,5 @@
 import asyncio
+from typing import Literal
 
 from prompt_toolkit import Application
 from prompt_toolkit.output.color_depth import ColorDepth
@@ -18,21 +19,37 @@ from ui.model_select_overlay import ModelSelectOverlay
 from ui.system_prompt_overlay import SystemPromptOverlay
 from ui.help_overlay import HelpOverlay
 
+_Mode = Literal["input", "browse", "tree_overlay", "model_overlay", "system_overlay", "help_overlay"]
+
 
 class ChatApp:
     def __init__(self, session: ChatSession) -> None:
         self._session = session
-        self._mode = "input"  # "input" | "browse" | "tree_overlay" | "model_overlay"
+        self._mode: _Mode = "input"
         self._streaming = False
         self._branch_target_id: int | None = None
+        self._stream_task: asyncio.Task | None = None
+        self._pending_message: str = ""
 
         self._chat_view = ChatView()
         self._tree_overlay = TreeSelectOverlay()
         self._model_overlay = ModelSelectOverlay()
         self._system_overlay = SystemPromptOverlay()
         self._help_overlay = HelpOverlay()
-        self._stream_task: asyncio.Task | None = None
-        self._pending_message: str = ""
+
+        # Condition は一度だけ構築し layout / keybindings 両方で共有する
+        self._is_input = Condition(lambda: self._mode == "input")
+        self._is_browse = Condition(lambda: self._mode == "browse")
+        self._is_tree_overlay = Condition(lambda: self._mode == "tree_overlay")
+        self._is_model_overlay = Condition(lambda: self._mode == "model_overlay")
+        self._is_system_overlay = Condition(lambda: self._mode == "system_overlay")
+        self._is_help_overlay = Condition(lambda: self._mode == "help_overlay")
+        self._is_any_overlay = (
+            self._is_tree_overlay | self._is_model_overlay |
+            self._is_system_overlay | self._is_help_overlay
+        )
+        self._is_tree_confirming = Condition(lambda: self._tree_overlay.is_confirming())
+        self._is_streaming = Condition(lambda: self._streaming)
 
         self._input_area = TextArea(
             multiline=True,
@@ -63,10 +80,12 @@ class ChatApp:
         return app
 
     def _build_layout(self) -> Layout:
-        is_tree_overlay = Condition(lambda: self._mode == "tree_overlay")
-        is_model_overlay = Condition(lambda: self._mode == "model_overlay")
-        is_system_overlay = Condition(lambda: self._mode == "system_overlay")
-        is_help_overlay = Condition(lambda: self._mode == "help_overlay")
+        def _float(window, condition):
+            return Float(
+                content=ConditionalContainer(content=window, filter=condition),
+                xcursor=False,
+                ycursor=False,
+            )
 
         root = FloatContainer(
             content=HSplit([
@@ -75,38 +94,10 @@ class ChatApp:
                 self._input_area,
             ]),
             floats=[
-                Float(
-                    content=ConditionalContainer(
-                        content=self._tree_overlay.window,
-                        filter=is_tree_overlay,
-                    ),
-                    xcursor=False,
-                    ycursor=False,
-                ),
-                Float(
-                    content=ConditionalContainer(
-                        content=self._model_overlay.window,
-                        filter=is_model_overlay,
-                    ),
-                    xcursor=False,
-                    ycursor=False,
-                ),
-                Float(
-                    content=ConditionalContainer(
-                        content=self._system_overlay.window,
-                        filter=is_system_overlay,
-                    ),
-                    xcursor=False,
-                    ycursor=False,
-                ),
-                Float(
-                    content=ConditionalContainer(
-                        content=self._help_overlay.window,
-                        filter=is_help_overlay,
-                    ),
-                    xcursor=False,
-                    ycursor=False,
-                ),
+                _float(self._tree_overlay.window, self._is_tree_overlay),
+                _float(self._model_overlay.window, self._is_model_overlay),
+                _float(self._system_overlay.window, self._is_system_overlay),
+                _float(self._help_overlay.window, self._is_help_overlay),
             ],
         )
 
@@ -115,15 +106,15 @@ class ChatApp:
     def _build_keybindings(self) -> KeyBindings:
         kb = KeyBindings()
 
-        is_input = Condition(lambda: self._mode == "input")
-        is_browse = Condition(lambda: self._mode == "browse")
-        is_tree_overlay = Condition(lambda: self._mode == "tree_overlay")
-        is_model_overlay = Condition(lambda: self._mode == "model_overlay")
-        is_system_overlay = Condition(lambda: self._mode == "system_overlay")
-        is_help_overlay = Condition(lambda: self._mode == "help_overlay")
-        is_any_overlay = is_tree_overlay | is_model_overlay | is_system_overlay | is_help_overlay
-        is_tree_confirming = Condition(lambda: self._tree_overlay.is_confirming())
-        is_streaming = Condition(lambda: self._streaming)
+        is_input = self._is_input
+        is_browse = self._is_browse
+        is_tree_overlay = self._is_tree_overlay
+        is_model_overlay = self._is_model_overlay
+        is_system_overlay = self._is_system_overlay
+        is_help_overlay = self._is_help_overlay
+        is_any_overlay = self._is_any_overlay
+        is_tree_confirming = self._is_tree_confirming
+        is_streaming = self._is_streaming
         not_streaming = ~is_streaming
 
         @kb.add("?", filter=~is_any_overlay)

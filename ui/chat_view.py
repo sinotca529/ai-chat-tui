@@ -132,7 +132,7 @@ class ChatView:
 
     # ── 行構築 ────────────────────────────────────────────────────────────────
 
-    def _build_row(self, index: int, entry: ThreadEntry) -> tuple:
+    def _build_row(self, index: int, entry: ThreadEntry) -> tuple[VSplit | Window, Window]:
         content_ctrl = FormattedTextControl(
             text=lambda e=entry, i=index: self._render_entry(e, i),
             focusable=True,
