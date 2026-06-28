@@ -9,14 +9,23 @@ class ChatTree:
         tree_id: str | None = None,
         nodes: list[Node] | None = None,
         current_id: int | None = None,
+        title: str = "",
     ) -> None:
         self._tree_id = tree_id or str(uuid.uuid4())
         self._nodes: list[Node] = nodes or []
         self._current_id: int | None = current_id
+        self._title: str = title
 
     @property
     def tree_id(self) -> str:
         return self._tree_id
+
+    @property
+    def title(self) -> str:
+        return self._title
+
+    def set_title(self, title: str) -> None:
+        self._title = title
 
     @property
     def current_id(self) -> int | None:
@@ -55,6 +64,7 @@ class ChatTree:
     def to_dict(self) -> dict:
         return {
             "tree_id": self._tree_id,
+            "title": self._title,
             "current_id": self._current_id,
             "nodes": [
                 {
@@ -82,4 +92,5 @@ class ChatTree:
             tree_id=data["tree_id"],
             nodes=nodes,
             current_id=data.get("current_id"),
+            title=data.get("title", ""),
         )

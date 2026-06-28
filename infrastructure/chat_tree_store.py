@@ -18,12 +18,22 @@ class ChatTreeStore:
         with open(path, "r", encoding="utf-8") as f:
             return ChatTree.from_dict(json.load(f))
 
-    def list_ids(self) -> list[str]:
-        return sorted(
-            fname[:-5]
-            for fname in os.listdir(self._save_dir)
-            if fname.endswith(".json")
-        )
+    def list_trees(self) -> list[tuple[str, str]]:
+        """(tree_id, title) のリストを返す（tree_id 昇順）"""
+        result = []
+        for fname in os.listdir(self._save_dir):
+            if not fname.endswith(".json"):
+                continue
+            tree_id = fname[:-5]
+            path = os.path.join(self._save_dir, fname)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                title = data.get("title", "")
+            except Exception:
+                title = ""
+            result.append((tree_id, title))
+        return sorted(result, key=lambda x: x[0])
 
     def new_tree(self) -> ChatTree:
         return ChatTree()

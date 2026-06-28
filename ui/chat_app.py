@@ -197,8 +197,8 @@ class ChatApp:
         # ツリー選択オーバーレイ
         @kb.add("c-t", filter=~is_any_overlay)
         def _open_tree_overlay(event):
-            ids = self._session.list_tree_ids()
-            self._tree_overlay.load(ids)
+            trees = self._session.list_trees()
+            self._tree_overlay.load(trees)
             self._mode = "tree_overlay"
             event.app.layout.focus(self._tree_overlay.control)
 
@@ -293,11 +293,20 @@ class ChatApp:
                 self._chat_view.append_chunk(chunk)
                 self._app.invalidate()
             self._refresh_chat_view()
+            if not self._session.title:
+                asyncio.ensure_future(self._auto_title())
         except Exception as e:
             self._chat_view.append_chunk(f"\n[エラー: {e}]")
         finally:
             self._streaming = False
             self._app.invalidate()
+            self._app.layout.focus(self._input_area)
+
+    async def _auto_title(self) -> None:
+        try:
+            await self._session.generate_title()
+        except Exception:
+            pass
 
     async def _load_models(self) -> None:
         try:

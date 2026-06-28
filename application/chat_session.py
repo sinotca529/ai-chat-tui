@@ -67,8 +67,25 @@ class ChatSession:
     def siblings_of(self, node_id: int) -> list[int]:
         return self._tree.siblings_with_self(node_id)
 
-    def list_tree_ids(self) -> list[str]:
-        return self._store.list_ids()
+    @property
+    def title(self) -> str:
+        return self._tree.title
+
+    def set_title(self, title: str) -> None:
+        self._tree.set_title(title)
+        self._store.save(self._tree)
+
+    async def generate_title(self) -> str:
+        messages = [
+            {"role": str(e.node.role), "content": e.node.content}
+            for e in self.current_thread()
+        ]
+        title = await self._api.generate_title(messages)
+        self.set_title(title)
+        return title
+
+    def list_trees(self) -> list[tuple[str, str]]:
+        return self._store.list_trees()
 
     def load_tree(self, tree_id: str) -> None:
         self._tree = self._store.load(tree_id)

@@ -14,6 +14,18 @@ class ApiHandler:
     def set_model(self, model_id: str) -> None:
         self._model = model_id
 
+    async def generate_title(self, messages: list[dict]) -> str:
+        prompt = messages + [{
+            "role": "user",
+            "content": "この会話に短いタイトルをつけてください。10〜20文字程度で、タイトルのみ返してください。",
+        }]
+        response = await self._client.chat.completions.create(
+            model=self._model,
+            messages=prompt,
+            stream=False,
+        )
+        return response.choices[0].message.content.strip()
+
     async def list_models(self) -> list[str]:
         response = await self._client.models.list()
         return sorted(m.id for m in response.data)
