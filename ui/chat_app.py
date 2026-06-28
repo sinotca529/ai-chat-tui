@@ -44,13 +44,15 @@ class ChatApp:
         style = merge_styles([
             style_from_pygments_cls(get_style_by_name("monokai")),
         ])
-        return Application(
+        app = Application(
             layout=layout,
             key_bindings=kb,
             full_screen=True,
             mouse_support=False,
             style=style,
         )
+        app.ttimeoutlen = 0.05
+        return app
 
     def _build_layout(self) -> Layout:
         is_tree_overlay = Condition(lambda: self._mode == "tree_overlay")
