@@ -30,10 +30,10 @@ class ChatApp:
 
         self._input_area = TextArea(
             multiline=True,
-            prompt="  > ",
             height=8,
             scrollbar=False,
             wrap_lines=True,
+            get_line_prefix=self._input_prefix,
         )
 
         self._app = self._build_app()
@@ -121,6 +121,12 @@ class ChatApp:
             self._mode = "browse"
             self._chat_view.set_browse_mode(True)
             event.app.layout.focus(self._chat_view.control)
+
+        @kb.add("escape", filter=is_input)
+        def _cancel_branch(event):
+            if self._branch_target_id is not None:
+                self._branch_target_id = None
+                self._input_area.text = ""
 
         @kb.add("tab", filter=is_browse)
         @kb.add("escape", filter=is_browse)
@@ -237,6 +243,13 @@ class ChatApp:
             if e.node.id == next_sibling_id:
                 self._chat_view._cursor_index = i
                 break
+
+    def _input_prefix(self, lineno: int, wrap_count: int):
+        if lineno == 0 and wrap_count == 0:
+            if self._branch_target_id is not None:
+                return [("fg:ansiyellow bold", "e ")]
+            return [("", "> ")]
+        return [("", "  ")]
 
     def _refresh_chat_view(self) -> None:
         entries = self._session.current_thread()
