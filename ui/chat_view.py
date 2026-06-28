@@ -27,7 +27,7 @@ class ChatView:
         self._stream_window = Window(
             content=self._stream_control,
             wrap_lines=True,
-            get_line_prefix=lambda lineno, wrap_count: "  " if wrap_count > 0 else "",
+            get_line_prefix=lambda lineno, wrap_count: "  " if (lineno > 0 or wrap_count > 0) else "",
             style="",
             dont_extend_height=True,
         )
