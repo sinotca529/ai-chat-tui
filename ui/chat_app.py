@@ -2,6 +2,8 @@ import asyncio
 import traceback
 from typing import Literal
 
+import pyperclip
+
 from prompt_toolkit import Application
 from prompt_toolkit.output.color_depth import ColorDepth
 from prompt_toolkit.filters import Condition
@@ -244,6 +246,13 @@ class ChatApp:
         def _sibling_next(event):
             self._switch_sibling(1)
 
+        @kb.add("y", filter=is_browse)
+        def _yank(event):
+            entry = self._chat_view.selected_entry()
+            if entry is None:
+                return
+            pyperclip.copy(entry.node.content)
+
         @kb.add("e", filter=is_browse & not_streaming)
         def _branch_edit(event):
             entry = self._chat_view.selected_entry()
@@ -279,10 +288,12 @@ class ChatApp:
             event.app.layout.focus(self._input_area)
 
         @kb.add("up", filter=is_tree_overlay)
+        @kb.add("k", filter=is_tree_overlay)
         def _tree_up(event):
             self._tree_overlay.move_up()
 
         @kb.add("down", filter=is_tree_overlay)
+        @kb.add("j", filter=is_tree_overlay)
         def _tree_down(event):
             self._tree_overlay.move_down()
 
@@ -351,10 +362,12 @@ class ChatApp:
             event.app.layout.focus(self._input_area)
 
         @kb.add("up", filter=is_model_overlay)
+        @kb.add("k", filter=is_model_overlay)
         def _model_up(event):
             self._model_overlay.move_up()
 
         @kb.add("down", filter=is_model_overlay)
+        @kb.add("j", filter=is_model_overlay)
         def _model_down(event):
             self._model_overlay.move_down()
 
