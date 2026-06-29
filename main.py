@@ -22,12 +22,13 @@ async def main() -> None:
     api_key = os.environ.get("OPENAI_API_KEY", "dummy")
     url = config["api"]["url"]
     model = config["api"]["model"]
+    api_key_header = config["api"].get("api_key_header")
     save_dir = config["storage"]["save_dir"]
 
     default_system_prompt = config.get("system", {}).get("prompt", "")
 
     store = ChatTreeStore(save_dir)
-    api = ApiHandler(url=url, api_key=api_key, model=model)
+    api = ApiHandler(url=url, api_key=api_key, model=model, api_key_header=api_key_header)
     tree = store.new_tree()
     session = ChatSession(
         tree=tree,

@@ -3,8 +3,11 @@ from openai import AsyncOpenAI
 
 
 class ApiHandler:
-    def __init__(self, url: str, api_key: str, model: str) -> None:
-        self._client = AsyncOpenAI(base_url=url, api_key=api_key)
+    def __init__(self, url: str, api_key: str, model: str, api_key_header: str | None = None) -> None:
+        if api_key_header:
+            self._client = AsyncOpenAI(base_url=url, api_key="dummy", default_headers={api_key_header: api_key})
+        else:
+            self._client = AsyncOpenAI(base_url=url, api_key=api_key)
         self._model = model
 
     @property

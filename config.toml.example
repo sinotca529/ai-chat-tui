@@ -1,6 +1,7 @@
 [api]
 url   = "http://localhost:11434/v1"
 model = "your-model-name"
+# api_key_header = "api-key"  # 省略時は Authorization: Bearer (標準動作)
 
 [storage]
 save_dir = "./trees"
