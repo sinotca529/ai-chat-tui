@@ -42,8 +42,9 @@ class ApiHandler:
             stream=True,
         )
         async for chunk in response:
-            if not chunk.choices:
+            choices = chunk.choices
+            if not choices:
                 continue
-            delta = chunk.choices[0].delta.content
+            delta = choices[0].delta.content
             if delta:
                 yield delta
