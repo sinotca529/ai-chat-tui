@@ -23,12 +23,13 @@ async def main() -> None:
     url = config["api"]["url"]
     model = config["api"]["model"]
     api_key_header = config["api"].get("api_key_header")
+    tools_enabled = config.get("tools", {}).get("web_search", False)
     save_dir = config["storage"]["save_dir"]
 
     default_system_prompt = config.get("system", {}).get("prompt", "")
 
     store = ChatTreeStore(save_dir)
-    api = ApiHandler(url=url, api_key=api_key, model=model, api_key_header=api_key_header)
+    api = ApiHandler(url=url, api_key=api_key, model=model, api_key_header=api_key_header, tools_enabled=tools_enabled)
     tree = store.new_tree()
     session = ChatSession(
         tree=tree,

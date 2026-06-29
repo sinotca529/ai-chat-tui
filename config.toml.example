@@ -6,5 +6,8 @@ model = "your-model-name"
 [storage]
 save_dir = "./trees"
 
+# [tools]
+# web_search = true  # モデルが function calling 非対応の場合は false のまま
+
 [system]
 prompt = ""
