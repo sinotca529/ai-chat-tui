@@ -24,6 +24,8 @@ class ApiHandler:
             messages=prompt,
             stream=False,
         )
+        if not response.choices:
+            return ""
         title = response.choices[0].message.content.strip()
         if title.startswith("「") and title.endswith("」"):
             title = title[1:-1]
@@ -40,6 +42,8 @@ class ApiHandler:
             stream=True,
         )
         async for chunk in response:
+            if not chunk.choices:
+                continue
             delta = chunk.choices[0].delta.content
             if delta:
                 yield delta
