@@ -1,4 +1,5 @@
 import asyncio
+import traceback
 from typing import Literal
 
 from prompt_toolkit import Application
@@ -397,7 +398,8 @@ class ChatApp:
             self._input_area.text = self._pending_message
             self._refresh_chat_view()
         except Exception as e:
-            self._chat_view.append_chunk(f"\n[エラー: {e}]")
+            tb = traceback.format_exc()
+            self._chat_view.append_chunk(f"\n[エラー: {e}]\n{tb}")
         finally:
             self._streaming = False
             self._stream_task = None
