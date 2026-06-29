@@ -279,10 +279,12 @@ class ChatApp:
             event.app.layout.focus(self._input_area)
 
         @kb.add("up", filter=is_tree_overlay)
+        @kb.add("k", filter=is_tree_overlay)
         def _tree_up(event):
             self._tree_overlay.move_up()
 
         @kb.add("down", filter=is_tree_overlay)
+        @kb.add("j", filter=is_tree_overlay)
         def _tree_down(event):
             self._tree_overlay.move_down()
 
