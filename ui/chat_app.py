@@ -255,6 +255,16 @@ class ChatApp:
             self._chat_view.set_browse_mode(False)
             event.app.layout.focus(self._input_area)
 
+        # 新規チャット
+        @kb.add("c-n", filter=~is_any_overlay & not_streaming)
+        def _new_chat(event):
+            self._session.new_tree()
+            self._branch_target_id = None
+            self._mode = "input"
+            self._chat_view.set_browse_mode(False)
+            self._refresh_chat_view()
+            event.app.layout.focus(self._input_area)
+
         # ツリー選択オーバーレイ
         @kb.add("c-t", filter=~is_any_overlay)
         def _open_tree_overlay(event):
