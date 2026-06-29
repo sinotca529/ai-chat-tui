@@ -353,10 +353,12 @@ class ChatApp:
             event.app.layout.focus(self._input_area)
 
         @kb.add("up", filter=is_model_overlay)
+        @kb.add("k", filter=is_model_overlay)
         def _model_up(event):
             self._model_overlay.move_up()
 
         @kb.add("down", filter=is_model_overlay)
+        @kb.add("j", filter=is_model_overlay)
         def _model_down(event):
             self._model_overlay.move_down()
 
