@@ -2,6 +2,8 @@ import asyncio
 import traceback
 from typing import Literal
 
+import pyperclip
+
 from prompt_toolkit import Application
 from prompt_toolkit.output.color_depth import ColorDepth
 from prompt_toolkit.filters import Condition
@@ -243,6 +245,13 @@ class ChatApp:
         @kb.add("l", filter=is_browse)
         def _sibling_next(event):
             self._switch_sibling(1)
+
+        @kb.add("y", filter=is_browse)
+        def _yank(event):
+            entry = self._chat_view.selected_entry()
+            if entry is None:
+                return
+            pyperclip.copy(entry.node.content)
 
         @kb.add("e", filter=is_browse & not_streaming)
         def _branch_edit(event):
