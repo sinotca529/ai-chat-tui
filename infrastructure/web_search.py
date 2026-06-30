@@ -36,5 +36,5 @@ def register(registry: ToolRegistry) -> None:
     registry.register(
         _DEFINITION,
         lambda args: search(args.get("query", "")),
-        indicator=lambda args: f"\n[🔍 {args.get('query', '')}]\n",
+        indicator=lambda args: f"\n[web_search: {args.get('query', '')}]\n",
     )
