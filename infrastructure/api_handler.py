@@ -2,23 +2,7 @@ import json
 from dataclasses import dataclass, field
 from typing import AsyncIterator
 from openai import AsyncOpenAI
-from .web_search import search
-
-
-_SEARCH_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "web_search",
-        "description": "Search the web for recent or current information.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search query"},
-            },
-            "required": ["query"],
-        },
-    },
-}
+from .tool_registry import ToolRegistry
 
 _MAX_TOOL_ROUNDS = 5
 
@@ -31,13 +15,20 @@ class _RoundResult:
 
 
 class ApiHandler:
-    def __init__(self, url: str, api_key: str, model: str, api_key_header: str | None = None, tools_enabled: bool = False) -> None:
+    def __init__(
+        self,
+        url: str,
+        api_key: str,
+        model: str,
+        api_key_header: str | None = None,
+        registry: ToolRegistry | None = None,
+    ) -> None:
         if api_key_header:
             self._client = AsyncOpenAI(base_url=url, api_key="dummy", default_headers={api_key_header: api_key})
         else:
             self._client = AsyncOpenAI(base_url=url, api_key=api_key)
         self._model = model
-        self._tools_enabled = tools_enabled
+        self._registry = registry or ToolRegistry()
 
     @property
     def model(self) -> str:
@@ -68,7 +59,7 @@ class ApiHandler:
         return sorted(m.id for m in response.data)
 
     async def stream(self, messages: list[dict]) -> AsyncIterator[str]:
-        tools = [_SEARCH_TOOL] if self._tools_enabled else None
+        tools = self._registry.definitions() if self._registry else None
         current_messages = list(messages)
 
         for _ in range(_MAX_TOOL_ROUNDS):
@@ -135,11 +126,14 @@ class ApiHandler:
             ],
         })
         for _, tc in sorted(result.tool_calls.items()):
-            if tc["name"] == "web_search":
-                query = json.loads(tc["arguments"]).get("query", "")
-                yield f"\n[🔍 {query}]\n"
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": search(query),
-                })
+            args = json.loads(tc["arguments"])
+            entry = self._registry.get(tc["name"])
+            if entry is None:
+                continue
+            if entry.indicator:
+                yield entry.indicator(args)
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": entry.handler(args),
+            })

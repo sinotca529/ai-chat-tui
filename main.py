@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 from application.chat_session import ChatSession
 from infrastructure.api_handler import ApiHandler
 from infrastructure.chat_tree_store import ChatTreeStore
+from infrastructure.tool_registry import ToolRegistry
+import infrastructure.web_search as web_search_tool
 from ui.chat_app import ChatApp
 
 
@@ -23,13 +25,15 @@ async def main() -> None:
     url = config["api"]["url"]
     model = config["api"]["model"]
     api_key_header = config["api"].get("api_key_header")
-    tools_enabled = config.get("tools", {}).get("web_search", False)
     save_dir = config["storage"]["save_dir"]
-
     default_system_prompt = config.get("system", {}).get("prompt", "")
 
+    registry = ToolRegistry()
+    if config.get("tools", {}).get("web_search", False):
+        web_search_tool.register(registry)
+
     store = ChatTreeStore(save_dir)
-    api = ApiHandler(url=url, api_key=api_key, model=model, api_key_header=api_key_header, tools_enabled=tools_enabled)
+    api = ApiHandler(url=url, api_key=api_key, model=model, api_key_header=api_key_header, registry=registry)
     tree = store.new_tree()
     session = ChatSession(
         tree=tree,
