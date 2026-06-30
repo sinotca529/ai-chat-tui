@@ -62,6 +62,7 @@ class ApiHandler:
     async def stream(self, messages: list[dict]) -> AsyncIterator[str]:
         tools = [_SEARCH_TOOL] if self._tools_enabled else None
         current_messages = list(messages)
+        rounds_exhausted = False
 
         for _ in range(_MAX_TOOL_ROUNDS):
             kwargs = {"tools": tools} if tools else {}
@@ -125,3 +126,18 @@ class ApiHandler:
                         "tool_call_id": tc["id"],
                         "content": result,
                     })
+        else:
+            rounds_exhausted = True
+
+        if rounds_exhausted:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=current_messages,
+                stream=True,
+            )
+            async for chunk in response:
+                choices = chunk.choices
+                if not choices:
+                    continue
+                if chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
