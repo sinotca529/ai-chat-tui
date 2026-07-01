@@ -1,3 +1,4 @@
+import asyncio
 import json
 from dataclasses import dataclass, field
 from typing import AsyncIterator
@@ -5,6 +6,10 @@ from openai import AsyncOpenAI
 from .tool_registry import ToolRegistry
 
 _MAX_TOOL_ROUNDS = 5
+
+
+class ToolIndicator(str):
+    """ツール実行中の表示専用トークン。アシスタントの応答内容には含まれない。"""
 
 
 @dataclass
@@ -126,14 +131,20 @@ class ApiHandler:
             ],
         })
         for _, tc in sorted(result.tool_calls.items()):
-            args = json.loads(tc["arguments"])
+            args = json.loads(tc["arguments"] or "{}")
             entry = self._registry.get(tc["name"])
             if entry is None:
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": f"Unknown tool: {tc['name']}",
+                })
                 continue
             if entry.indicator:
-                yield entry.indicator(args)
+                yield ToolIndicator(entry.indicator(args))
+            tool_result = await asyncio.to_thread(entry.handler, args)
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
-                "content": entry.handler(args),
+                "content": tool_result,
             })

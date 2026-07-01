@@ -2,7 +2,7 @@ from typing import AsyncIterator
 from domain.chat_tree import ChatTree
 from domain.role import Role
 from application.thread_entry import ThreadEntry
-from infrastructure.api_handler import ApiHandler
+from infrastructure.api_handler import ApiHandler, ToolIndicator
 from infrastructure.chat_tree_store import ChatTreeStore
 
 
@@ -73,7 +73,8 @@ class ChatSession:
         async for chunk in self._api.stream(
             thread_messages + [{"role": "user", "content": msg}]
         ):
-            full_response += chunk
+            if not isinstance(chunk, ToolIndicator):
+                full_response += chunk
             yield chunk
 
         asst_id = self._tree.insert(user_id, Role.ASSISTANT, full_response)
