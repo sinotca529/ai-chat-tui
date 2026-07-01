@@ -159,7 +159,7 @@ class ApiHandler:
 
         for i, outcome in enumerate(outcomes):
             tool_id = sorted_tcs[i][0]
-            if isinstance(outcome, BaseException):
+            if isinstance(outcome, Exception):
                 content = f"Tool error: {outcome}"
             else:
                 _, content = outcome

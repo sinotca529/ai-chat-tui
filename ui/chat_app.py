@@ -1,5 +1,4 @@
 import asyncio
-import traceback
 from typing import Literal
 
 import pyperclip
@@ -420,9 +419,10 @@ class ChatApp:
             self._session.rollback_last_user_message()
             self._input_area.text = self._pending_message
             self._refresh_chat_view()
-        except Exception as e:
-            tb = traceback.format_exc()
-            self._chat_view.append_chunk(f"\n[エラー: {e}]\n{tb}")
+        except Exception:
+            self._session.rollback_last_user_message()
+            self._input_area.text = self._pending_message
+            self._refresh_chat_view()
         finally:
             self._streaming = False
             self._stream_task = None
