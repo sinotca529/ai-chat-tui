@@ -80,6 +80,8 @@ class ChatSession:
             yield chunk
 
         if not full_response:
+            # この時点でツリーに挿入済みなのはユーザーノードのみ（assistant ノード未挿入）。
+            # rollback() 1 回で send_message 呼び出し前の状態に戻る。
             self._tree.rollback()
             return
         asst_id = self._tree.insert(user_id, Role.ASSISTANT, full_response)
