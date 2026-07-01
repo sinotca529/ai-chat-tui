@@ -1,4 +1,6 @@
+from __future__ import annotations
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.layout.controls import FormattedTextControl
@@ -7,6 +9,9 @@ from prompt_toolkit.layout.containers import DynamicContainer
 from application.thread_entry import ThreadEntry
 from domain.role import Role
 from ui.highlight import iter_content, highlight_code
+
+if TYPE_CHECKING:
+    from application.chat_session import ChatSession
 
 
 @dataclass(frozen=True)
@@ -28,19 +33,22 @@ class _RowEntry:
 
 
 class ChatView:
-    def __init__(self) -> None:
-        # カーソル操作用（本物のエントリーのみ）
+    def __init__(self, session: ChatSession) -> None:
+        self._session = session
         self._entries: list[ThreadEntry] = []
-        # 表示行用（ストリーミング中はユーザーメッセージの仮行を含む）
-        self._row_entries: list[_RowEntry] = []
-
-        self._streaming_text: str = ""
         self._cursor_index: int = -1
         self._browse_mode: bool = False
-
         self._rows: list = []
         self._content_windows: list[Window] = []
-        self._is_streaming: bool = False
+
+        # ストリーミング中の未確定ユーザーメッセージ行（セッションから動的に読む）
+        self._pending_window = Window(
+            content=FormattedTextControl(text=self._get_pending_text),
+            wrap_lines=True,
+            get_line_prefix=lambda lineno, wrap_count: "  " if wrap_count > 0 else "",
+            style=lambda: self._row_style(-2, Role.USER),
+            dont_extend_height=True,
+        )
 
         self._stream_control = FormattedTextControl(
             text=self._get_stream_text,
@@ -61,7 +69,9 @@ class ChatView:
 
     def _get_container(self):
         rows = list(self._rows)
-        if self._is_streaming:
+        if self._session.pending_user_msg is not None:
+            rows.append(self._pending_window)
+        if self._session.streaming_text:
             rows.append(self._stream_window)
         if not rows:
             return Window(content=FormattedTextControl(lambda: [("", "")]))
@@ -71,30 +81,14 @@ class ChatView:
 
     def update(self, entries: list[ThreadEntry]) -> None:
         self._entries = entries
-        self._row_entries = [_RowEntry.from_thread_entry(e) for e in entries]
-        self._streaming_text = ""
-        self._is_streaming = False
         self._rows = []
         self._content_windows = []
-        for i, row_entry in enumerate(self._row_entries):
-            row, content_win = self._build_row(i, row_entry)
+        for i, entry in enumerate(entries):
+            row, content_win = self._build_row(i, _RowEntry.from_thread_entry(entry))
             self._rows.append(row)
             self._content_windows.append(content_win)
         if self._cursor_index >= len(entries):
             self._cursor_index = -1
-
-    def start_streaming(self, user_msg: str) -> None:
-        pending = _RowEntry(role=Role.USER, content=user_msg, sibling_index=1, sibling_count=1)
-        row, content_win = self._build_row(len(self._rows), pending)
-        self._rows.append(row)
-        self._content_windows.append(content_win)
-        self._row_entries = self._row_entries + [pending]
-        # _entries は変更しない（本物のエントリーのみ保持）
-        self._streaming_text = ""
-        self._is_streaming = True
-
-    def append_chunk(self, chunk: str) -> None:
-        self._streaming_text += chunk
 
     def set_browse_mode(self, enabled: bool) -> None:
         self._browse_mode = enabled
@@ -203,14 +197,24 @@ class ChatView:
         result.append(("", "\n"))
         return result
 
+    def _get_pending_text(self) -> StyleAndTextTuples:
+        msg = self._session.pending_user_msg
+        if msg is None:
+            return []
+        entry = _RowEntry(role=Role.USER, content=msg, sibling_index=1, sibling_count=1)
+        # -2 は _cursor_index と一致しない番兵値（選択スタイルを当てないため）
+        return self._render_entry(entry, -2)
+
     def _get_stream_text(self) -> StyleAndTextTuples:
+        text = self._session.streaming_text
         return [
             ("bold fg:ansibrightgreen", "*"),
-            ("", f" {self._streaming_text}▌\n"),
+            ("", f" {text}▌\n"),
         ]
 
     def _get_stream_cursor_pos(self) -> Point:
-        y = f" {self._streaming_text}▌".count("\n")
+        text = self._session.streaming_text
+        y = f" {text}▌".count("\n")
         return Point(x=0, y=y)
 
     def _render_content(
