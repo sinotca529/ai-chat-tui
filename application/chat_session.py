@@ -77,6 +77,9 @@ class ChatSession:
                 full_response += chunk
             yield chunk
 
+        if not full_response:
+            self._tree.rollback()
+            return
         asst_id = self._tree.insert(user_id, Role.ASSISTANT, full_response)
         self._tree.set_current(asst_id)
         self._store.save(self._tree)

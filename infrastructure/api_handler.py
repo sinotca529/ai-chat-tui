@@ -118,6 +118,9 @@ class ApiHandler:
     async def _execute_tool_calls(
         self, result: _RoundResult, messages: list[dict]
     ) -> AsyncIterator[str]:
+        sorted_tcs = [(tc["id"], tc["name"], json.loads(tc["arguments"] or "{}"))
+                      for _, tc in sorted(result.tool_calls.items())]
+
         messages.append({
             "role": "assistant",
             "content": "".join(result.content) or None,
@@ -130,21 +133,22 @@ class ApiHandler:
                 for _, tc in sorted(result.tool_calls.items())
             ],
         })
-        for _, tc in sorted(result.tool_calls.items()):
-            args = json.loads(tc["arguments"] or "{}")
-            entry = self._registry.get(tc["name"])
-            if entry is None:
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": f"Unknown tool: {tc['name']}",
-                })
-                continue
-            if entry.indicator:
+
+        # インジケーターを先に順番どおり表示
+        for tool_id, name, args in sorted_tcs:
+            entry = self._registry.get(name)
+            if entry and entry.indicator:
                 yield ToolIndicator(entry.indicator(args))
-            tool_result = await asyncio.to_thread(entry.handler, args)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": tool_result,
-            })
+
+        # ハンドラを並列実行
+        async def _run(tool_id: str, name: str, args: dict) -> tuple[str, str]:
+            entry = self._registry.get(name)
+            if entry is None:
+                return tool_id, f"Unknown tool: {name}"
+            content = await asyncio.to_thread(entry.handler, args)
+            return tool_id, content
+
+        results = await asyncio.gather(*[_run(tid, name, args) for tid, name, args in sorted_tcs])
+
+        for tool_id, content in results:
+            messages.append({"role": "tool", "tool_call_id": tool_id, "content": content})
