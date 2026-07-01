@@ -73,6 +73,8 @@ class ChatSession:
         async for chunk in self._api.stream(
             thread_messages + [{"role": "user", "content": msg}]
         ):
+            # ToolIndicator はツール実行中の表示専用トークン。
+            # UI には流すが、ツリーに保存するアシスタント応答には含めない。
             if not isinstance(chunk, ToolIndicator):
                 full_response += chunk
             yield chunk

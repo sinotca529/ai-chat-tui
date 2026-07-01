@@ -78,6 +78,8 @@ class ApiHandler:
             async for indicator in self._execute_tool_calls(result, current_messages):
                 yield indicator
         else:
+            # ツールラウンド上限に達した（break されずにループを抜けた）場合。
+            # tools=None でもう1回リクエストしてモデルに最終テキスト応答を強制する。
             async for token in self._stream_one_round(current_messages, None, _RoundResult()):
                 yield token
 
