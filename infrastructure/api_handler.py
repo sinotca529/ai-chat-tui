@@ -64,7 +64,8 @@ class ApiHandler:
         return sorted(m.id for m in response.data)
 
     async def stream(self, messages: list[dict]) -> AsyncIterator[str]:
-        tools = self._registry.definitions() if self._registry else None
+        defs = self._registry.definitions()
+        tools = defs or None
         current_messages = list(messages)
 
         for _ in range(_MAX_TOOL_ROUNDS):
@@ -120,7 +121,7 @@ class ApiHandler:
     async def _execute_tool_calls(
         self, result: _RoundResult, messages: list[dict]
     ) -> AsyncIterator[str]:
-        sorted_tcs = [(tc["id"], tc["name"], json.loads(tc["arguments"] or "{}"))
+        sorted_tcs = [(tc["id"], tc["name"], tc["arguments"], json.loads(tc["arguments"] or "{}"))
                       for _, tc in sorted(result.tool_calls.items())]
 
         messages.append({
@@ -128,16 +129,16 @@ class ApiHandler:
             "content": "".join(result.content) or None,
             "tool_calls": [
                 {
-                    "id": tc["id"],
+                    "id": tool_id,
                     "type": "function",
-                    "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                    "function": {"name": name, "arguments": raw_args},
                 }
-                for _, tc in sorted(result.tool_calls.items())
+                for tool_id, name, raw_args, _ in sorted_tcs
             ],
         })
 
         # インジケーターを先に順番どおり表示
-        for tool_id, name, args in sorted_tcs:
+        for tool_id, name, _, args in sorted_tcs:
             entry = self._registry.get(name)
             if entry and entry.indicator:
                 yield ToolIndicator(entry.indicator(args))
@@ -153,7 +154,7 @@ class ApiHandler:
         # return_exceptions=True でハンドラの例外をキャプチャし、必ずツール結果を補完する。
         # False のままだと assistant の tool_calls メッセージだけ残り次の API 呼び出しが 400 になる。
         outcomes = await asyncio.gather(
-            *[_run(tid, name, args) for tid, name, args in sorted_tcs],
+            *[_run(tid, name, args) for tid, name, _, args in sorted_tcs],
             return_exceptions=True,
         )
 

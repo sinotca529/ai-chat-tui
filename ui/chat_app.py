@@ -415,14 +415,14 @@ class ChatApp:
                 self._app.layout.focus(last_win)
             if not self._session.title:
                 asyncio.ensure_future(self._auto_title())
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, Exception) as exc:
             self._session.rollback_last_user_message()
             self._input_area.text = self._pending_message
-            self._refresh_chat_view()
-        except Exception:
-            self._session.rollback_last_user_message()
-            self._input_area.text = self._pending_message
-            self._refresh_chat_view()
+            if isinstance(exc, asyncio.CancelledError):
+                self._refresh_chat_view()
+            else:
+                entries = self._session.current_thread()
+                self._chat_view.show_error(entries, f"[Error] {exc}")
         finally:
             self._streaming = False
             self._stream_task = None

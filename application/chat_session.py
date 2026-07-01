@@ -86,7 +86,13 @@ class ChatSession:
             return
         asst_id = self._tree.insert(user_id, Role.ASSISTANT, full_response)
         self._tree.set_current(asst_id)
-        self._store.save(self._tree)
+        try:
+            self._store.save(self._tree)
+        except Exception:
+            # save() 失敗時はアシスタントノードを取り消し、呼び出し元の rollback で
+            # ユーザーノードも除去できる状態にしてから再送出する。
+            self._tree.rollback()
+            raise
 
     def rollback_last_user_message(self) -> None:
         self._tree.rollback()

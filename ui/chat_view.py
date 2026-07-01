@@ -96,6 +96,12 @@ class ChatView:
     def append_chunk(self, chunk: str) -> None:
         self._streaming_text += chunk
 
+    def show_error(self, entries: list[ThreadEntry], error_msg: str) -> None:
+        """コミット済みエントリーを entries に更新しつつ、エラーメッセージを表示したままにする。"""
+        self.update(entries)
+        self._streaming_text = error_msg
+        self._is_streaming = True
+
     def set_browse_mode(self, enabled: bool) -> None:
         self._browse_mode = enabled
         if enabled and self._cursor_index < 0:
