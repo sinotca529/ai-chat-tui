@@ -150,7 +150,17 @@ class ApiHandler:
             content = await asyncio.to_thread(entry.handler, args)
             return tool_id, content
 
-        results = await asyncio.gather(*[_run(tid, name, args) for tid, name, args in sorted_tcs])
+        # return_exceptions=True でハンドラの例外をキャプチャし、必ずツール結果を補完する。
+        # False のままだと assistant の tool_calls メッセージだけ残り次の API 呼び出しが 400 になる。
+        outcomes = await asyncio.gather(
+            *[_run(tid, name, args) for tid, name, args in sorted_tcs],
+            return_exceptions=True,
+        )
 
-        for tool_id, content in results:
+        for i, outcome in enumerate(outcomes):
+            tool_id = sorted_tcs[i][0]
+            if isinstance(outcome, BaseException):
+                content = f"Tool error: {outcome}"
+            else:
+                _, content = outcome
             messages.append({"role": "tool", "tool_call_id": tool_id, "content": content})
