@@ -1,4 +1,4 @@
-from typing import AsyncIterator
+from collections.abc import Callable
 from domain.chat_tree import ChatTree
 from domain.role import Role
 from application.thread_entry import ThreadEntry
@@ -18,6 +18,21 @@ class ChatSession:
         self._api = api
         self._store = store
         self._default_system_prompt = default_system_prompt
+        self._streaming_text: str = ""
+        self._pending_user_msg: str | None = None
+        self._error_text: str = ""
+
+    @property
+    def streaming_text(self) -> str:
+        """ストリーミング中のテキスト、またはエラーメッセージ。"""
+        return self._streaming_text or self._error_text
+
+    @property
+    def pending_user_msg(self) -> str | None:
+        return self._pending_user_msg
+
+    def set_stream_error(self, msg: str) -> None:
+        self._error_text = msg
 
     @property
     def tree_id(self) -> str:
@@ -64,24 +79,33 @@ class ChatSession:
             messages = [{"role": "system", "content": effective}] + messages
         return messages
 
-    async def send_message(self, msg: str) -> AsyncIterator[str]:
+    async def send_message(self, msg: str, invalidate: Callable[[], None]) -> None:
         thread_messages = self._build_thread_messages()
-        user_id = self._tree.insert(self._tree.current_id, Role.USER, msg)
-        self._tree.set_current(user_id)
+        self._error_text = ""
+        self._pending_user_msg = msg
+        self._streaming_text = ""
+        try:
+            async for chunk in self._api.stream(
+                thread_messages + [{"role": "user", "content": msg}]
+            ):
+                self._streaming_text += chunk
+                invalidate()
 
-        full_response = ""
-        async for chunk in self._api.stream(
-            thread_messages + [{"role": "user", "content": msg}]
-        ):
-            full_response += chunk
-            yield chunk
+            if not self._streaming_text:
+                return
 
-        asst_id = self._tree.insert(user_id, Role.ASSISTANT, full_response)
-        self._tree.set_current(asst_id)
-        self._store.save(self._tree)
-
-    def rollback_last_user_message(self) -> None:
-        self._tree.rollback()
+            user_id = self._tree.insert(self._tree.current_id, Role.USER, msg)
+            asst_id = self._tree.insert(user_id, Role.ASSISTANT, self._streaming_text)
+            self._tree.set_current(asst_id)
+            try:
+                self._store.save(self._tree)
+            except Exception:
+                self._tree.rollback()
+                self._tree.rollback()
+                raise
+        finally:
+            self._pending_user_msg = None
+            self._streaming_text = ""
 
     def navigate_to(self, node_id: int) -> None:
         self._tree.set_current(node_id)

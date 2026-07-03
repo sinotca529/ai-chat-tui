@@ -1,5 +1,4 @@
 import asyncio
-import traceback
 from typing import Literal
 
 import pyperclip
@@ -35,7 +34,7 @@ class ChatApp:
         self._stream_task: asyncio.Task | None = None
         self._pending_message: str = ""
 
-        self._chat_view = ChatView()
+        self._chat_view = ChatView(self._session)
         self._tree_overlay = TreeSelectOverlay()
         self._model_overlay = ModelSelectOverlay()
         self._system_overlay = SystemPromptOverlay()
@@ -179,7 +178,6 @@ class ChatApp:
                 self._session.navigate_to(self._branch_target_id)
                 self._branch_target_id = None
             self._pending_message = msg
-            self._chat_view.start_streaming(msg)
             event.app.layout.focus(self._chat_view.stream_window)
             self._stream_task = asyncio.ensure_future(self._do_stream(msg))
 
@@ -407,9 +405,7 @@ class ChatApp:
 
     async def _do_stream(self, msg: str) -> None:
         try:
-            async for chunk in self._session.send_message(msg):
-                self._chat_view.append_chunk(chunk)
-                self._app.invalidate()
+            await self._session.send_message(msg, self._app.invalidate)
             self._refresh_chat_view()
             last_win = self._chat_view.last_content_window()
             if last_win:
@@ -417,12 +413,12 @@ class ChatApp:
             if not self._session.title:
                 asyncio.ensure_future(self._auto_title())
         except asyncio.CancelledError:
-            self._session.rollback_last_user_message()
             self._input_area.text = self._pending_message
             self._refresh_chat_view()
-        except Exception as e:
-            tb = traceback.format_exc()
-            self._chat_view.append_chunk(f"\n[エラー: {e}]\n{tb}")
+        except Exception as exc:
+            self._session.set_stream_error(f"\n[エラー: {exc}]")
+            self._input_area.text = self._pending_message
+            self._refresh_chat_view()
         finally:
             self._streaming = False
             self._stream_task = None
