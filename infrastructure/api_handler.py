@@ -139,10 +139,10 @@ class ApiHandler:
                 yield ToolIndicator(entry.indicator(args))
 
         async def _run(tool_id: str, name: str, args: dict) -> tuple[str, str]:
-            entry = self._registry.get(name)
-            if entry is None:
+            tf = self._registry.get(name)
+            if tf is None:
                 return tool_id, f"Unknown tool: {name}"
-            content = await asyncio.to_thread(entry.handler, args)
+            content = await asyncio.to_thread(tf, args)
             return tool_id, content
 
         # return_exceptions=True: ハンドラ例外をキャプチャし、必ずツール結果を補完する。
