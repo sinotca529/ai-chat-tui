@@ -198,6 +198,7 @@ class ChatApp:
                 return
             self._input_area.text = ""
             self._streaming = True
+            self._chat_view.window.stick_to_bottom = True
             if self._branch_editing:
                 self._session.navigate_to(self._branch_target_id)
                 self._branch_editing = False
@@ -210,6 +211,8 @@ class ChatApp:
         @kb.add("tab", filter=is_input)
         def _to_browse(event):
             self._mode = "browse"
+            # 過去メッセージを読むモードに入るので下端追従を止める
+            self._chat_view.window.stick_to_bottom = False
             self._chat_view.set_browse_mode(True)
             win = self._chat_view.selected_content_window()
             if win:
@@ -296,6 +299,7 @@ class ChatApp:
             self._session.new_tree()
             self._branch_editing = False
             self._branch_target_id = None
+            self._chat_view.window.stick_to_bottom = True
             self._mode = "input"
             self._chat_view.set_browse_mode(False)
             self._refresh_chat_view()
@@ -333,6 +337,7 @@ class ChatApp:
                 self._session.load_tree(tree_id)
             self._branch_editing = False
             self._branch_target_id = None
+            self._chat_view.window.stick_to_bottom = True  # 末尾（最新メッセージ）を表示
             self._mode = "input"
             self._chat_view.set_browse_mode(False)
             self._refresh_chat_view()

@@ -7,6 +7,8 @@ from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout import Window, VSplit, HSplit, ScrollablePane
 from prompt_toolkit.layout.containers import DynamicContainer
+from prompt_toolkit.layout.mouse_handlers import MouseHandlers
+from prompt_toolkit.layout.screen import Screen, WritePosition
 from application.thread_entry import ThreadEntry
 from domain.role import Role
 from ui.highlight import iter_content, highlight_code
@@ -45,6 +47,42 @@ class _RowEntry:
         )
 
 
+class AutoScrollPane(ScrollablePane):
+    """`stick_to_bottom` が True の間、描画のたびに下端へスクロールする ScrollablePane。
+
+    ScrollablePane はフォーカスされた Window がペイン内にあるときしかスクロール位置を
+    調整しない。ストリーミング中はフォーカスが入力欄（ペイン外）にあるため、
+    下端への追従はここで write_to_screen のたびに行う。仮想高さの計算は親クラスの
+    write_to_screen と同一のロジック（スクロールバー分の幅補正を含む）を用いる。
+    """
+
+    def __init__(self, content: DynamicContainer) -> None:
+        super().__init__(content)
+        self.stick_to_bottom = True
+
+    def write_to_screen(
+        self,
+        screen: Screen,
+        mouse_handlers: MouseHandlers,
+        write_position: WritePosition,
+        parent_style: str,
+        erase_bg: bool,
+        z_index: int | None,
+    ) -> None:
+        if self.stick_to_bottom:
+            virtual_width = write_position.width - (1 if self.show_scrollbar() else 0)
+            virtual_height = max(
+                self.content.preferred_height(
+                    virtual_width, self.max_available_height
+                ).preferred,
+                write_position.height,
+            )
+            self.vertical_scroll = virtual_height - write_position.height
+        super().write_to_screen(
+            screen, mouse_handlers, write_position, parent_style, erase_bg, z_index
+        )
+
+
 class ChatView:
     def __init__(self, session: ChatSession) -> None:
         self._session = session
@@ -76,7 +114,7 @@ class ChatView:
             dont_extend_height=True,
         )
 
-        self.window = ScrollablePane(DynamicContainer(self._get_container))
+        self.window = AutoScrollPane(DynamicContainer(self._get_container))
 
     # ── コンテナ ──────────────────────────────────────────────────────────────
 
