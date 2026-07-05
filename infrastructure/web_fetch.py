@@ -8,8 +8,13 @@ _MAX_DOWNLOAD_BYTES = 5 * 1024 * 1024  # 5 MiB
 _MAX_TEXT_CHARS = 8000  # コンテキスト保護のため抽出本文をこの長さで切り詰める
 
 _HEADERS = {
-    # デフォルト UA を弾くサイトが多いためブラウザ風の UA を名乗る
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) ai-chat-tui/0.1",
+    # 非ブラウザ UA を弾くサイトが多いため、実在ブラウザと同形式の UA を名乗る。
+    # Chrome は UA 凍結によりマイナーバージョンを 0.0.0 に固定しているため、
+    # この形式は実ブラウザと区別が付かず陳腐化もしにくい。
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+    ),
     "Accept-Language": "ja, en;q=0.7",
 }
 
