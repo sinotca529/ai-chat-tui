@@ -8,6 +8,7 @@ from application.chat_session import ChatSession
 from infrastructure.api_handler import ApiHandler
 from infrastructure.chat_tree_store import ChatTreeStore
 from infrastructure.tool_registry import ToolRegistry
+from infrastructure.web_fetch import fetch_page
 from infrastructure.web_search import web_search
 from ui.chat_app import ChatApp
 
@@ -31,7 +32,7 @@ async def main() -> None:
     default_system_prompt = config.get("system", {}).get("prompt", "")
 
     registry = ToolRegistry()
-    registry.register(web_search)
+    registry.register(web_search, fetch_page)
 
     store = ChatTreeStore(save_dir)
     api = ApiHandler(url=url, api_key=api_key, model=model, api_key_header=api_key_header, registry=registry)
