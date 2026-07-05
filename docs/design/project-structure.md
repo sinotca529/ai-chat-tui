@@ -17,12 +17,16 @@ ai-chat-tui/
 ├── infrastructure/
 │   ├── chat_tree_store.py   ChatTreeStore
 │   └── api_handler.py       ApiHandler
-└── ui/
-    ├── chat_app.py              ChatApp
-    ├── chat_view.py             ChatView
-    ├── highlight.py             コードブロックのシンタックスハイライト
-    ├── tree_select_overlay.py   TreeSelectOverlay
-    └── model_select_overlay.py  ModelSelectOverlay
+├── ui/
+│   ├── chat_app.py              ChatApp
+│   ├── chat_view.py             ChatView
+│   ├── highlight.py             コードブロックのシンタックスハイライト
+│   ├── tree_select_overlay.py   TreeSelectOverlay
+│   └── model_select_overlay.py  ModelSelectOverlay
+├── tests/                       テスト（docs/design/testing.md 参照）
+│   ├── conftest.py              FakeApiHandler などの共通フィクスチャ
+│   └── test_*.py                層ごとのテスト + TUI の E2E テスト
+└── .github/workflows/ci.yml     CI（push / PR ごとに pytest 実行）
 ```
 
 各ディレクトリは Python パッケージ（`__init__.py` あり）とする。
