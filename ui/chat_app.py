@@ -178,7 +178,7 @@ class ChatApp:
                 self._session.navigate_to(self._branch_target_id)
                 self._branch_target_id = None
             self._pending_message = msg
-            event.app.layout.focus(self._chat_view.stream_window)
+            self._session.prepare_streaming(msg)
             self._stream_task = asyncio.ensure_future(self._do_stream(msg))
 
         @kb.add("tab", filter=is_input)
