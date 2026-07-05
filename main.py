@@ -25,6 +25,7 @@ async def main() -> None:
     url = config["api"]["url"]
     model = config["api"]["model"]
     api_key_header = config["api"].get("api_key_header")
+    context_window = config["api"].get("context_window")
     save_dir = config["storage"]["save_dir"]
 
     default_system_prompt = config.get("system", {}).get("prompt", "")
@@ -40,6 +41,7 @@ async def main() -> None:
         api=api,
         store=store,
         default_system_prompt=default_system_prompt,
+        context_window=context_window,
     )
 
     app = ChatApp(session)

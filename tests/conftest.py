@@ -21,6 +21,7 @@ class FakeApiHandler:
         title: str = "生成タイトル",
         tool_messages: tuple = (),
         block_forever: bool = False,
+        summary_text: str = "これまでの要約",
     ) -> None:
         self.chunks = chunks
         self.title = title
@@ -28,6 +29,8 @@ class FakeApiHandler:
         self.last_tool_messages = list(tool_messages)
         self.block_forever = block_forever
         self.sent_messages: list[dict] | None = None  # 直近の stream() 呼び出し引数
+        self.summary_text = summary_text
+        self.summarize_calls: list[list[dict]] = []  # summarize() の入力履歴
 
     async def stream(self, messages: list[dict]):
         self.sent_messages = messages
@@ -40,6 +43,10 @@ class FakeApiHandler:
 
     async def generate_title(self, messages: list[dict]) -> str:
         return self.title
+
+    async def summarize(self, messages: list[dict]) -> str:
+        self.summarize_calls.append(messages)
+        return self.summary_text
 
     async def list_models(self) -> list[str]:
         return ["fake-model", "other-model"]

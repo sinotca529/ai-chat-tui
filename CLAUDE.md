@@ -51,6 +51,7 @@ Requires Python 3.13+. Key deps: `prompt-toolkit` (TUI framework), `openai` (API
 [api]
 url   = "http://localhost:11434/v1"
 model = "some-model"
+# context_window = 32768  # 設定するとコンテキスト圧縮が有効になる（任意）
 
 [storage]
 save_dir = "./trees"
@@ -68,7 +69,7 @@ UI 層 → アプリケーション層 → ドメイン層
 **ドメイン層 (`domain/`)**
 - `role.py` — `Role` (StrEnum: USER / ASSISTANT)
 - `node.py` — `Node` (frozen dataclass: id, role, content, parent_id, tool_messages)。`tool_messages` はツール呼び出しを伴う ASSISTANT ノードに付与される中間 API メッセージ列（`role: assistant/tool` のメッセージ）。表示には使わず、スレッド再構築時に最終応答の直前に注入してコンテキストを維持する。
-- `chat_tree.py` — `ChatTree`: append-only ツリー。子・兄弟は `parent_id` から導出。`title` / `system_prompt` フィールドを持つ。`rollback()` で末尾ノードを pop し `current_id` を親に戻す。
+- `chat_tree.py` — `ChatTree`: append-only ツリー。子・兄弟は `parent_id` から導出。`title` / `system_prompt` / `summary` / `summary_upto_id` フィールドを持つ（後者 2 つはコンテキスト圧縮用。1 ツリーに 1 スロット）。`rollback()` で末尾ノードを pop し `current_id` を親に戻す。
 
 **アプリケーション層 (`application/`)**
 - `thread_entry.py` — `ThreadEntry` (frozen dataclass: node + sibling_index + sibling_count)
@@ -76,7 +77,7 @@ UI 層 → アプリケーション層 → ドメイン層
 
 **インフラストラクチャ層 (`infrastructure/`)**
 - `chat_tree_store.py` — `ChatTreeStore`: `ChatTree` を JSON ファイルとして保存・読み込み・削除。`list_trees()` は `(tree_id, title)` ペアを返す。
-- `api_handler.py` — `ApiHandler`: `AsyncOpenAI` ラッパー。`stream()` / `generate_title()` / `list_models()` / `set_model()`。`stream()` 完了後に `last_tool_messages` でツール呼び出しの中間メッセージ列を取得できる。ツール実行は `asyncio.to_thread` で行う（同期ツール）。**ツール非対応サーバへのフォールバック**: `tools` 付きリクエストが 400 (BadRequestError) で拒否された場合、ツールなし + 履歴中のツール関連メッセージ（`role:tool` / `tool_calls` 付き assistant）除去で 1 回だけ再送信する。成功したら以後そのハンドラインスタンスではツールを無効化し（再試行の往復を繰り返さない）、表示専用の `ToolIndicator` でフォールバックを通知する。再送信も失敗した場合は tools 起因ではないため例外をそのまま伝播し、ツールは無効化しない。tools を送っていないリクエストの 400 は再試行しない。
+- `api_handler.py` — `ApiHandler`: `AsyncOpenAI` ラッパー。`stream()` / `generate_title()` / `summarize()` / `list_models()` / `set_model()`。`stream()` 完了後に `last_tool_messages` でツール呼び出しの中間メッセージ列を取得できる。ツール実行は `asyncio.to_thread` で行う（同期ツール）。**ツール非対応サーバへのフォールバック**: `tools` 付きリクエストが 400 (BadRequestError) で拒否された場合、ツールなし + 履歴中のツール関連メッセージ（`role:tool` / `tool_calls` 付き assistant）除去で 1 回だけ再送信する。成功したら以後そのハンドラインスタンスではツールを無効化し（再試行の往復を繰り返さない）、表示専用の `ToolIndicator` でフォールバックを通知する。再送信も失敗した場合は tools 起因ではないため例外をそのまま伝播し、ツールは無効化しない。tools を送っていないリクエストの 400 は再試行しない。
 
 **UI 層 (`ui/`)**
 - `chat_app.py` — `ChatApp`: top-level。モード管理・キーバインド・ストリーミング制御。
@@ -112,6 +113,8 @@ UI 層 → アプリケーション層 → ドメイン層
 **per-message Window アーキテクチャ**: メッセージ 1 件ごとに `Window` を作り `HSplit` に積む。`Window.style` をラムダにすることで行全体の背景色をロール・選択状態に応じて動的に制御する。サイドバー的な `[n/m]` 表示は `VSplit` で右端に配置。
 
 **ストリーミング**: `asyncio.ensure_future` でバックグラウンド実行。`ChatSession.send_message(msg, invalidate)` はコルーチンで、トークンを受け取るたびに `invalidate()` を呼んで差分再描画を促す。ストリーミング中は `ChatSession._pending_user_msg` / `_streaming_text` に状態を保持し、`ChatView` はこれを直接参照して `_pending_window` / `_stream_window` を表示する。ツリーへの書き込みはストリーミング完了後にのみ行われるため、キャンセルや API エラー時のロールバックは不要。`save()` 失敗時のみ `ChatTree.rollback()` を 2 回呼んで user / assistant ノードを取り消す。**ストリーミング開始前の不変条件**: `_pending_window` は `ChatView._rows`（`update()` で構築済みの行リスト）の末尾に追加される。そのためブランチ編集（`e` キー）経由で送信する場合は、`navigate_to` で `current_id` を分岐点に移動した直後に `_refresh_chat_view()` を呼び、`_rows` を分岐点までの状態に更新してからストリーミングを開始しなければならない。
+
+**コンテキスト圧縮（コンパクション）**: `config.toml` の `[api] context_window`（トークン数）を設定したときのみ有効（未設定なら無効 = opt-in）。送信前にリクエスト全体の推定トークン数が `context_window × 0.7` を超えたら、直近 4 ノードを残して古いノードを `ApiHandler.summarize()` で要約し、`ChatTree.summary` / `summary_upto_id` に保存する。トークン推定は「JSON 直列化長 × 1 文字 ≈ 1 トークン」の保守的近似（日本語で安全側、英語では早めに圧縮が走るだけ）。API 送信時は要約を system メッセージに合成し（`[これまでの会話の要約]` セクション）、要約済みノードは送らない。**ツリー構造・表示は一切変更しない**（append-only 維持、全ノードは browse で閲覧可能）。要約は 1 ツリーに 1 スロットで、`summary_upto_id` が現在のスレッドパス上にない間（別ブランチ閲覧中）は適用されず全ノードを生で送る。再圧縮は「旧要約 + 差分ノード」を入力とする増分方式。圧縮実行時はストリーミング表示の先頭に表示専用の `[コンテキストを圧縮しました]` を出す（ツリーには保存しない）。
 
 **タイトル自動生成**: 初回の AI 応答完了後にバックグラウンドで `ApiHandler.generate_title()` を呼び、結果を JSON に保存。未設定の場合は `tree_id` 先頭 16 文字で代替表示。
 

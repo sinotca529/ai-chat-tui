@@ -1,9 +1,25 @@
+import json
 from collections.abc import Callable
 from domain.chat_tree import ChatTree
 from domain.role import Role
 from application.thread_entry import ThreadEntry
 from infrastructure.api_handler import ApiHandler, ToolIndicator
 from infrastructure.chat_tree_store import ChatTreeStore
+
+# コンテキスト圧縮の発動閾値（context_window に対する推定トークン数の割合）
+_COMPACT_TRIGGER_RATIO = 0.7
+# 圧縮時に生のまま残す直近ノード数（2 往復分）
+_KEEP_RECENT_NODES = 4
+
+
+def _estimate_tokens(messages: list[dict]) -> int:
+    """リクエストの推定トークン数。1 文字 ≈ 1 トークンの保守的な近似。
+
+    日本語は 1 文字 1 トークン以上に分割されることもあるため、JSON 直列化長
+    （キーや記号を含む）で数えて安全側に倒す。英語では過大評価になるが、
+    早めに圧縮が走るだけで害はない。
+    """
+    return sum(len(json.dumps(m, ensure_ascii=False)) for m in messages)
 
 
 class ChatSession:
@@ -13,11 +29,13 @@ class ChatSession:
         api: ApiHandler,
         store: ChatTreeStore,
         default_system_prompt: str = "",
+        context_window: int | None = None,
     ) -> None:
         self._tree = tree
         self._api = api
         self._store = store
         self._default_system_prompt = default_system_prompt
+        self._context_window = context_window
         self._display_text: str = ""   # 表示用（ToolIndicator を含む）
         self._save_text: str = ""       # 保存用（ToolIndicator を除くテキストのみ）
         self._pending_user_msg: str | None = None
@@ -75,24 +93,75 @@ class ChatSession:
         if self._tree.current_id is not None:
             self._store.save(self._tree)
 
+    def _summary_state(self) -> tuple[str, list[ThreadEntry]]:
+        """適用可能な要約と、生のまま送るエントリ列を返す。
+
+        要約対象（summary_upto_id まで）が現在のスレッドパス上にある場合のみ
+        要約を適用する。別ブランチにいる間は要約を使わず全ノードを送る。
+        """
+        entries = self.current_thread()
+        summary = self._tree.summary
+        upto = self._tree.summary_upto_id
+        if summary and upto is not None:
+            ids = [e.node.id for e in entries]
+            if upto in ids:
+                return summary, entries[ids.index(upto) + 1:]
+        return "", entries
+
     def _build_thread_messages(self) -> list[dict]:
+        summary, entries = self._summary_state()
         messages = []
-        for e in self.current_thread():
+        for e in entries:
             if e.node.tool_messages:
                 messages.extend(list(e.node.tool_messages))
             messages.append({"role": str(e.node.role), "content": e.node.content})
-        effective = self.effective_system_prompt
-        if effective:
-            messages = [{"role": "system", "content": effective}] + messages
+        system_parts = []
+        if self.effective_system_prompt:
+            system_parts.append(self.effective_system_prompt)
+        if summary:
+            system_parts.append(f"[これまでの会話の要約]\n{summary}")
+        if system_parts:
+            messages = [{"role": "system", "content": "\n\n".join(system_parts)}] + messages
         return messages
 
+    async def _maybe_compact(self, next_msg: str) -> bool:
+        """必要ならコンテキストを圧縮する。圧縮を実行したら True を返す。"""
+        if not self._context_window:
+            return False
+        request = self._build_thread_messages() + [{"role": "user", "content": next_msg}]
+        if _estimate_tokens(request) <= self._context_window * _COMPACT_TRIGGER_RATIO:
+            return False
+        prev_summary, entries = self._summary_state()
+        if len(entries) <= _KEEP_RECENT_NODES:
+            return False
+        to_summarize = entries[:-_KEEP_RECENT_NODES]
+
+        src: list[dict] = []
+        if prev_summary:
+            # 増分方式: 旧要約 + その後のノードを入力にして要約し直す
+            src.append({"role": "user", "content": f"[これまでの会話の要約]\n{prev_summary}"})
+        for e in to_summarize:
+            src.append({"role": str(e.node.role), "content": e.node.content})
+
+        summary = await self._api.summarize(src)
+        if not summary:
+            return False
+        self._tree.set_summary(summary, to_summarize[-1].node.id)
+        if self._tree.current_id is not None:
+            self._store.save(self._tree)
+        return True
+
     async def send_message(self, msg: str, invalidate: Callable[[], None]) -> None:
-        thread_messages = self._build_thread_messages()
         self._error_text = ""
         self._pending_user_msg = msg
         self._display_text = ""
         self._save_text = ""
         try:
+            if await self._maybe_compact(msg):
+                # 表示専用の通知。_save_text には入れないためツリーには残らない。
+                self._display_text = "[コンテキストを圧縮しました]\n"
+                invalidate()
+            thread_messages = self._build_thread_messages()
             async for chunk in self._api.stream(
                 thread_messages + [{"role": "user", "content": msg}]
             ):
