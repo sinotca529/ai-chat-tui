@@ -76,7 +76,7 @@ UI 層 → アプリケーション層 → ドメイン層
 
 **インフラストラクチャ層 (`infrastructure/`)**
 - `chat_tree_store.py` — `ChatTreeStore`: `ChatTree` を JSON ファイルとして保存・読み込み・削除。`list_trees()` は `(tree_id, title)` ペアを返す。
-- `api_handler.py` — `ApiHandler`: `AsyncOpenAI` ラッパー。`stream()` / `generate_title()` / `list_models()` / `set_model()`。`stream()` 完了後に `last_tool_messages` でツール呼び出しの中間メッセージ列を取得できる。ツール実行は `asyncio.to_thread` で行う（同期ツール）。
+- `api_handler.py` — `ApiHandler`: `AsyncOpenAI` ラッパー。`stream()` / `generate_title()` / `list_models()` / `set_model()`。`stream()` 完了後に `last_tool_messages` でツール呼び出しの中間メッセージ列を取得できる。ツール実行は `asyncio.to_thread` で行う（同期ツール）。**ツール非対応サーバへのフォールバック**: `tools` 付きリクエストが 400 (BadRequestError) で拒否された場合、ツールなし + 履歴中のツール関連メッセージ（`role:tool` / `tool_calls` 付き assistant）除去で 1 回だけ再送信する。成功したら以後そのハンドラインスタンスではツールを無効化し（再試行の往復を繰り返さない）、表示専用の `ToolIndicator` でフォールバックを通知する。再送信も失敗した場合は tools 起因ではないため例外をそのまま伝播し、ツールは無効化しない。tools を送っていないリクエストの 400 は再試行しない。
 
 **UI 層 (`ui/`)**
 - `chat_app.py` — `ChatApp`: top-level。モード管理・キーバインド・ストリーミング制御。

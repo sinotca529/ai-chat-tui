@@ -1,7 +1,17 @@
 from types import SimpleNamespace
 
+import httpx
+import pytest
+from openai import BadRequestError
+
 from infrastructure.api_handler import ApiHandler, ToolIndicator, _MAX_TOOL_ROUNDS
 from infrastructure.tool_registry import ToolRegistry, tool
+
+
+def _bad_request(msg: str = "tools is not supported") -> BadRequestError:
+    request = httpx.Request("POST", "http://fake/chat/completions")
+    response = httpx.Response(400, request=request, json={"error": {"message": msg}})
+    return BadRequestError(msg, response=response, body=None)
 
 
 def _text_chunk(text: str | None = None, finish: str | None = None):
@@ -164,6 +174,110 @@ async def test_max_tool_rounds_forces_final_text_response():
     assert chunks[-1] == "forced final"
     assert len(completions.calls) == _MAX_TOOL_ROUNDS + 1
     assert "tools" not in completions.calls[-1]  # 最終ラウンドは tools なしで強制
+
+
+class _ToolRejectingCompletions(_FakeCompletions):
+    """tools パラメータ付きのリクエストを 400 で拒否するスタブ（ツール非対応サーバ）。"""
+
+    async def create(self, **kwargs):
+        if "tools" in kwargs:
+            self.calls.append(kwargs)
+            raise _bad_request()
+        return await super().create(**kwargs)
+
+
+class _AlwaysRejectingCompletions:
+    """全リクエストを 400 で拒否するスタブ。"""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def create(self, **kwargs):
+        self.calls.append(kwargs)
+        raise _bad_request("some other bad request")
+
+
+async def test_tools_unsupported_server_falls_back_without_tools():
+    rounds = [
+        [_text_chunk("こんにちは", finish="stop")],
+        [_text_chunk("二回目", finish="stop")],
+    ]
+    handler, _ = _make_handler([], registry=_echo_registry())
+    completions = _ToolRejectingCompletions(rounds)
+    handler._client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+    chunks = await _collect(handler, [{"role": "user", "content": "hi"}])
+
+    # フォールバック通知（表示専用）→ 本文の順で yield される
+    assert isinstance(chunks[0], ToolIndicator)
+    assert chunks[1] == "こんにちは"
+    # 1 回目: tools 付きで 400 → 2 回目: tools なしで再送信
+    assert "tools" in completions.calls[0]
+    assert "tools" not in completions.calls[1]
+
+    # 以後のリクエストは最初から tools を送らない（再試行の往復が発生しない）
+    chunks2 = await _collect(handler, [{"role": "user", "content": "again"}])
+    assert chunks2 == ["二回目"]
+    assert len(completions.calls) == 3
+    assert "tools" not in completions.calls[2]
+
+
+async def test_fallback_strips_tool_messages_from_history():
+    """過去にツール対応サーバで作られた履歴（role:tool 等）も除去して送る"""
+    history = [
+        {"role": "user", "content": "調べて"},
+        {"role": "assistant", "content": None,
+         "tool_calls": [{"id": "t1", "type": "function",
+                         "function": {"name": "web_search", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "t1", "content": "result"},
+        {"role": "assistant", "content": "回答"},
+        {"role": "user", "content": "続けて"},
+    ]
+    rounds = [
+        [_text_chunk("ok", finish="stop")],
+        [_text_chunk("ok2", finish="stop")],
+    ]
+    handler, _ = _make_handler([], registry=_echo_registry())
+    completions = _ToolRejectingCompletions(rounds)
+    handler._client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+    await _collect(handler, history)
+    retry_messages = completions.calls[1]["messages"]
+    assert [m["role"] for m in retry_messages] == ["user", "assistant", "user"]
+    assert retry_messages[1] == {"role": "assistant", "content": "回答"}
+
+    # フォールバック確定後の 2 通目でも履歴からツール関連メッセージを除去する
+    await _collect(handler, history)
+    assert [m["role"] for m in completions.calls[2]["messages"]] == [
+        "user", "assistant", "user",
+    ]
+
+
+async def test_bad_request_without_tools_propagates():
+    """tools を送っていないリクエストの 400 は再試行せずそのまま伝播する"""
+    handler, _ = _make_handler([])  # レジストリ空 = tools なし
+    completions = _AlwaysRejectingCompletions()
+    handler._client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+    with pytest.raises(BadRequestError):
+        await _collect(handler, [{"role": "user", "content": "hi"}])
+    assert len(completions.calls) == 1  # 再試行しない
+
+
+async def test_fallback_retry_failure_propagates_and_keeps_tools_enabled():
+    """再試行も 400 なら tools 起因ではないので例外を伝播し、ツールは無効化しない"""
+    handler, _ = _make_handler([], registry=_echo_registry())
+    completions = _AlwaysRejectingCompletions()
+    handler._client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+    with pytest.raises(BadRequestError):
+        await _collect(handler, [{"role": "user", "content": "hi"}])
+    assert len(completions.calls) == 2  # tools 付き → tools なしの 2 回で打ち切り
+
+    # 次のリクエストでは引き続き tools を送る（誤って無効化されていない）
+    with pytest.raises(BadRequestError):
+        await _collect(handler, [{"role": "user", "content": "hi"}])
+    assert "tools" in completions.calls[2]
 
 
 async def test_generate_title_strips_brackets():
