@@ -56,7 +56,7 @@ UI 層 → アプリケーション層 → ドメイン層
 
 **ドメイン層 (`domain/`)**
 - `role.py` — `Role` (StrEnum: USER / ASSISTANT)
-- `node.py` — `Node` (frozen dataclass: id, role, content, parent_id)
+- `node.py` — `Node` (frozen dataclass: id, role, content, parent_id, tool_messages)。`tool_messages` はツール呼び出しを伴う ASSISTANT ノードに付与される中間 API メッセージ列（`role: assistant/tool` のメッセージ）。表示には使わず、スレッド再構築時に最終応答の直前に注入してコンテキストを維持する。
 - `chat_tree.py` — `ChatTree`: append-only ツリー。子・兄弟は `parent_id` から導出。`title` / `system_prompt` フィールドを持つ。`rollback()` で末尾ノードを pop し `current_id` を親に戻す。
 
 **アプリケーション層 (`application/`)**
@@ -65,7 +65,7 @@ UI 層 → アプリケーション層 → ドメイン層
 
 **インフラストラクチャ層 (`infrastructure/`)**
 - `chat_tree_store.py` — `ChatTreeStore`: `ChatTree` を JSON ファイルとして保存・読み込み・削除。`list_trees()` は `(tree_id, title)` ペアを返す。
-- `api_handler.py` — `ApiHandler`: `AsyncOpenAI` ラッパー。`stream()` / `generate_title()` / `list_models()` / `set_model()`。
+- `api_handler.py` — `ApiHandler`: `AsyncOpenAI` ラッパー。`stream()` / `generate_title()` / `list_models()` / `set_model()`。`stream()` 完了後に `last_tool_messages` でツール呼び出しの中間メッセージ列を取得できる。ツール実行は `asyncio.to_thread` で行う（同期ツール）。
 
 **UI 層 (`ui/`)**
 - `chat_app.py` — `ChatApp`: top-level。モード管理・キーバインド・ストリーミング制御。
