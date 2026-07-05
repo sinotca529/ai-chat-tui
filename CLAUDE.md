@@ -12,6 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **警告・エラーの扱い**: 警告やエラーが発生した場合は必ず根本原因を調査すること。`warnings.filterwarnings` や `try/except` で症状を隠す対処療法を根本原因の究明より先に行ってはならない。
 
+**テストの維持（デグレ防止）**: コミット前に必ず `uv run pytest` を実行し、全テストが通ることを確認する。挙動を追加・変更するコミットには、対応するテストの追加・更新を同一コミットに含めること。バグ修正時は先に再現テストを書いてから直す。テスト戦略・フェイクの使い方は `docs/design/testing.md` を参照。
+
 ## Running the app
 
 ```bash
@@ -23,6 +25,15 @@ python main.py
 ```
 
 The app connects to an OpenAI-compatible API endpoint. Settings are in `config.toml`.
+
+## Running tests
+
+```bash
+uv sync           # dev 依存 (pytest, pytest-asyncio) を含めてインストール
+uv run pytest     # 全テスト実行（実 API・実端末に依存しない、数秒で完了）
+```
+
+テストは実 AI サーバに接続しない。API は `tests/conftest.py` の `FakeApiHandler` で、端末は prompt_toolkit の `create_pipe_input` + `DummyOutput` で差し替える。CI (GitHub Actions) が push / PR ごとに全テストを実行する。詳細は `docs/design/testing.md`。
 
 ## Dependencies
 
