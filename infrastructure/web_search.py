@@ -1,4 +1,4 @@
-from duckduckgo_search import AsyncDDGS
+from ddgs import DDGS
 from .tool_registry import tool
 
 
@@ -19,8 +19,8 @@ from .tool_registry import tool
     },
     indicator=lambda args: f"[web_search: {args.get('query', '')}]\n",
 )
-async def web_search(query: str) -> str:
-    results = await AsyncDDGS().atext(query, max_results=5)
+def web_search(query: str) -> str:
+    results = DDGS().text(query, max_results=5)
     if not results:
         return "No results found."
     return "\n\n".join(f"[{r['title']}]({r['href']})\n{r['body']}" for r in results)

@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 import json
 from dataclasses import dataclass, field
 from typing import AsyncIterator
@@ -143,10 +142,7 @@ class ApiHandler:
             tf = self._registry.get(name)
             if tf is None:
                 return tool_id, f"Unknown tool: {name}"
-            if inspect.iscoroutinefunction(tf._fn):
-                content = await tf._fn(**args)
-            else:
-                content = await asyncio.to_thread(tf, args)
+            content = await asyncio.to_thread(tf, args)
             return tool_id, content
 
         # return_exceptions=True: ハンドラ例外をキャプチャし、必ずツール結果を補完する。
