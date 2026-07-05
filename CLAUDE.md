@@ -69,7 +69,7 @@ UI 層 → アプリケーション層 → ドメイン層
 
 **UI 層 (`ui/`)**
 - `chat_app.py` — `ChatApp`: top-level。モード管理・キーバインド・ストリーミング制御。
-- `chat_view.py` — `ChatView`: メッセージごとに `Window` を生成し `HSplit` に積む。`ScrollablePane` + `DynamicContainer` でラップ。ブラウズモードのカーソルも管理。自身に状態は持たず、`ChatSession` を参照して描画する。
+- `chat_view.py` — `ChatView`: メッセージごとに `Window` を生成し `HSplit` に積む。`ScrollablePane` + `DynamicContainer` でラップ。ブラウズモードのカーソルも管理。自身に状態は持たず、`ChatSession` を参照して描画する。内部の `_RowEntry` は `node.tool_messages` からツール呼び出し情報 `(name, args)` を抽出して保持し、メッセージ本文の後に改行して `[name: args]` の形式で黄色表示する（`fg:ansiyellow`）。
 - `highlight.py` — コードブロックのパース (`iter_content`) と Pygments によるハイライト (`highlight_code`)。
 - `tree_select_overlay.py` — `TreeSelectOverlay`: 保存済みツリーの選択・削除 UI。
 - `model_select_overlay.py` — `ModelSelectOverlay`: モデル一覧の選択 UI（非同期ロード）。
