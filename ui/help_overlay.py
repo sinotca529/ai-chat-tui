@@ -13,6 +13,7 @@ _HELP_LINES = [
     ("", "  Ctrl+T        ツリー選択\n"),
     ("", "  Ctrl+O        モデル選択\n"),
     ("", "  Ctrl+P        システムプロンプト編集\n"),
+    ("", "  F1            ヘルプ表示\n"),
     ("", "\n"),
     ("bold", "  browseモード\n"),
     ("", "  Tab / Esc     入力モードへ\n"),
@@ -33,7 +34,7 @@ _HELP_LINES = [
     ("", "  Enter        決定\n"),
     ("", "  Ctrl+O        閉じる\n"),
     ("", "\n"),
-    ("fg:ansigray", "  ? で閉じる\n"),
+    ("fg:ansigray", "  F1 で閉じる\n"),
 ]
 
 

@@ -20,6 +20,7 @@ CTRL_C = "\x03"
 CTRL_D = "\x04"
 CTRL_Q = "\x11"
 TAB = "\t"
+F1 = "\x1bOP"
 
 
 async def _wait_for(predicate, timeout: float = 5.0) -> None:
@@ -170,10 +171,32 @@ async def test_help_overlay_toggle(store):
     session = ChatSession(tree=ChatTree(), api=api, store=store)
 
     async with _running_app(session) as (app, pipe):
-        pipe.send_text("?")
+        pipe.send_text(F1)
         await _wait_for(lambda: app._mode == "help_overlay")
-        pipe.send_text("?")
+        pipe.send_text(F1)
         await _wait_for(lambda: app._mode == "input")
+
+
+async def test_question_mark_is_typed_into_input_not_bound_to_help(store):
+    """? キーはヘルプに割り当てず、メッセージ本文にそのまま入力できること"""
+    api = FakeApiHandler()
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text("これは質問ですか?")
+        await _wait_for(lambda: app._input_area.text == "これは質問ですか?")
+        assert app._mode == "input"
+
+
+async def test_ghost_text_hidden_once_typing_starts(store):
+    api = FakeApiHandler()
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        assert app._is_input_empty()
+        pipe.send_text("a")
+        await _wait_for(lambda: app._input_area.text == "a")
+        assert not app._is_input_empty()
 
 
 async def test_new_chat_switches_tree(store):
