@@ -155,4 +155,5 @@ class ApiHandler:
         for i, outcome in enumerate(outcomes):
             tool_id = sorted_tcs[i][0]
             content = f"Tool error: {outcome}" if isinstance(outcome, Exception) else outcome[1]
+            yield ToolIndicator(f"{content}\n")
             messages.append({"role": "tool", "tool_call_id": tool_id, "content": content})
