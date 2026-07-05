@@ -9,6 +9,7 @@ from prompt_toolkit.filters import Condition
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout, HSplit, FloatContainer, Float, Window
 from prompt_toolkit.layout.containers import ConditionalContainer
+from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.styles import merge_styles
 from prompt_toolkit.styles.pygments import style_from_pygments_cls
 from prompt_toolkit.widgets import TextArea
@@ -65,6 +66,18 @@ class ChatApp:
             get_line_prefix=self._input_prefix,
         )
 
+        # 入力欄が空のときだけ表示するゴーストテキスト（カーソル位置に追従する Float）
+        self._is_input_empty = Condition(
+            lambda: self._mode == "input" and not self._input_area.text
+        )
+        self._placeholder_window = Window(
+            content=FormattedTextControl(
+                text=[("fg:ansibrightblack", "Ctrl+D で送信, F1 でヘルプ")]
+            ),
+            dont_extend_width=True,
+            dont_extend_height=True,
+        )
+
         self._app = self._build_app()
         self._refresh_chat_view()
 
@@ -104,6 +117,14 @@ class ChatApp:
                 _float(self._model_overlay.window, self._is_model_overlay),
                 _float(self._system_overlay.window, self._is_system_overlay),
                 _float(self._help_overlay.window, self._is_help_overlay),
+                Float(
+                    content=ConditionalContainer(
+                        content=self._placeholder_window,
+                        filter=self._is_input_empty,
+                    ),
+                    xcursor=True,
+                    ycursor=True,
+                ),
             ],
         )
 
@@ -123,8 +144,8 @@ class ChatApp:
         is_streaming = self._is_streaming
         not_streaming = ~is_streaming
 
-        @kb.add("?", filter=~is_any_overlay)
-        @kb.add("?", filter=is_help_overlay)
+        @kb.add("f1", filter=~is_any_overlay)
+        @kb.add("f1", filter=is_help_overlay)
         def _toggle_help(event):
             if self._mode == "help_overlay":
                 self._mode = "input"
