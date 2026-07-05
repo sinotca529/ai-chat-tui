@@ -188,6 +188,58 @@ async def test_question_mark_is_typed_into_input_not_bound_to_help(store):
         assert app._mode == "input"
 
 
+async def test_autoscroll_follows_streaming_response(store):
+    """画面に収まらない長い応答のストリーミング中、下端に自動スクロールすること。
+
+    DummyOutput は 40 行 × 80 桁。チャットペインは約 31 行なので
+    60 行の応答は必ず溢れる。
+    """
+    api = FakeApiHandler(chunks=("行\n" * 60,), block_forever=True)
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text("長い応答をください")
+        pipe.send_text(CTRL_D)
+        await _wait_for(lambda: app._streaming)
+        # ストリーミング中（未確定表示の間）に下端へスクロールされる
+        await _wait_for(lambda: app._chat_view.window.vertical_scroll > 0)
+        pipe.send_text(CTRL_C)
+        await _wait_for(lambda: not app._streaming)
+
+
+async def test_autoscroll_after_response_completes(store):
+    api = FakeApiHandler(chunks=("行\n" * 60,))
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text("長い応答をください")
+        pipe.send_text(CTRL_D)
+        await _wait_for(lambda: len(session.current_thread()) == 2)
+        # 確定後の再描画でも下端に追従したままになる
+        await _wait_for(lambda: app._chat_view.window.vertical_scroll > 0)
+
+
+async def test_browse_mode_disables_autoscroll_until_next_send(store):
+    api = FakeApiHandler()
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        assert app._chat_view.window.stick_to_bottom  # 初期状態は追従 ON
+
+        pipe.send_text(TAB)  # browse モードへ → 過去を読むので追従 OFF
+        await _wait_for(lambda: app._mode == "browse")
+        assert not app._chat_view.window.stick_to_bottom
+
+        pipe.send_text(TAB)  # input へ戻っただけでは追従は復活しない
+        await _wait_for(lambda: app._mode == "input")
+        assert not app._chat_view.window.stick_to_bottom
+
+        pipe.send_text("次の質問")
+        pipe.send_text(CTRL_D)  # 送信で追従 ON に戻る
+        await _wait_for(lambda: len(session.current_thread()) == 2)
+        assert app._chat_view.window.stick_to_bottom
+
+
 async def test_ghost_text_hidden_once_typing_starts(store):
     api = FakeApiHandler()
     session = ChatSession(tree=ChatTree(), api=api, store=store)

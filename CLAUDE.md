@@ -107,6 +107,8 @@ UI 層 → アプリケーション層 → ドメイン層
 
 **入力欄のゴーストテキスト**: `ChatApp._is_input_empty`（input モードかつバッファが空）のとき、`Ctrl+D で送信, F1 でヘルプ` をカーソル位置に追従する Float（`xcursor=True, ycursor=True`）として表示する。バッファへの実書き込みではないため、送信時の内容に混入しない。
 
+**下端オートスクロール**: `ChatView.window` は `ScrollablePane` を拡張した `AutoScrollPane`。素の `ScrollablePane` はフォーカスされた Window がペイン内にあるときしかスクロールしないため（ストリーミング中のフォーカスは入力欄＝ペイン外）、`stick_to_bottom=True` の間は描画のたびに下端へスクロールする。追従の ON/OFF: 送信 (`Ctrl+D`)・新規チャット・ツリー選択で ON、browse モード進入 (`Tab`) で OFF（過去を読む操作を妨げない）。browse から input に戻っただけでは復活せず、次の送信で ON に戻る。
+
 **per-message Window アーキテクチャ**: メッセージ 1 件ごとに `Window` を作り `HSplit` に積む。`Window.style` をラムダにすることで行全体の背景色をロール・選択状態に応じて動的に制御する。サイドバー的な `[n/m]` 表示は `VSplit` で右端に配置。
 
 **ストリーミング**: `asyncio.ensure_future` でバックグラウンド実行。`ChatSession.send_message(msg, invalidate)` はコルーチンで、トークンを受け取るたびに `invalidate()` を呼んで差分再描画を促す。ストリーミング中は `ChatSession._pending_user_msg` / `_streaming_text` に状態を保持し、`ChatView` はこれを直接参照して `_pending_window` / `_stream_window` を表示する。ツリーへの書き込みはストリーミング完了後にのみ行われるため、キャンセルや API エラー時のロールバックは不要。`save()` 失敗時のみ `ChatTree.rollback()` を 2 回呼んで user / assistant ノードを取り消す。**ストリーミング開始前の不変条件**: `_pending_window` は `ChatView._rows`（`update()` で構築済みの行リスト）の末尾に追加される。そのためブランチ編集（`e` キー）経由で送信する場合は、`navigate_to` で `current_id` を分岐点に移動した直後に `_refresh_chat_view()` を呼び、`_rows` を分岐点までの状態に更新してからストリーミングを開始しなければならない。
