@@ -79,6 +79,25 @@ class ApiHandler:
             title = title[1:-1]
         return title
 
+    async def summarize(self, messages: list[dict]) -> str:
+        """コンテキスト圧縮用に会話を要約する。"""
+        prompt = messages + [{
+            "role": "user",
+            "content": (
+                "ここまでの会話を要約してください。"
+                "重要な事実・決定事項・未解決の話題・直近の文脈を保持し、"
+                "会話と同じ言語で簡潔に書いてください。要約のみを返してください。"
+            ),
+        }]
+        response = await self._client.chat.completions.create(
+            model=self._model,
+            messages=prompt,
+            stream=False,
+        )
+        if not response.choices:
+            return ""
+        return response.choices[0].message.content.strip()
+
     async def list_models(self) -> list[str]:
         response = await self._client.models.list()
         return sorted(m.id for m in response.data)

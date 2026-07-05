@@ -11,12 +11,17 @@ class ChatTree:
         current_id: int | None = None,
         title: str = "",
         system_prompt: str = "",
+        summary: str = "",
+        summary_upto_id: int | None = None,
     ) -> None:
         self._tree_id = tree_id or str(uuid.uuid4())
         self._nodes: list[Node] = nodes or []
         self._current_id: int | None = current_id
         self._title: str = title
         self._system_prompt: str = system_prompt
+        # コンテキスト圧縮の要約。summary_upto_id までのノードを要約したもの。
+        self._summary: str = summary
+        self._summary_upto_id: int | None = summary_upto_id
 
     @property
     def tree_id(self) -> str:
@@ -35,6 +40,19 @@ class ChatTree:
 
     def set_system_prompt(self, prompt: str) -> None:
         self._system_prompt = prompt
+
+    @property
+    def summary(self) -> str:
+        return self._summary
+
+    @property
+    def summary_upto_id(self) -> int | None:
+        return self._summary_upto_id
+
+    def set_summary(self, summary: str, upto_id: int) -> None:
+        """upto_id までのノードを対象とした要約を設定する（1 ツリーに 1 スロット）"""
+        self._summary = summary
+        self._summary_upto_id = upto_id
 
     @property
     def current_id(self) -> int | None:
@@ -90,6 +108,8 @@ class ChatTree:
             "tree_id": self._tree_id,
             "title": self._title,
             "system_prompt": self._system_prompt,
+            "summary": self._summary,
+            "summary_upto_id": self._summary_upto_id,
             "current_id": self._current_id,
             "nodes": [
                 {
@@ -121,4 +141,6 @@ class ChatTree:
             current_id=data.get("current_id"),
             title=data.get("title", ""),
             system_prompt=data.get("system_prompt", ""),
+            summary=data.get("summary", ""),
+            summary_upto_id=data.get("summary_upto_id"),
         )

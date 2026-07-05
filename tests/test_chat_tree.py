@@ -78,6 +78,7 @@ def test_dict_round_trip_preserves_everything():
     tree = _build_branched_tree()
     tree.set_title("タイトル")
     tree.set_system_prompt("プロンプト")
+    tree.set_summary("要約テキスト", upto_id=1)
     tool_msgs = (
         {"role": "assistant", "content": None, "tool_calls": []},
         {"role": "tool", "tool_call_id": "t1", "content": "result"},
@@ -90,6 +91,8 @@ def test_dict_round_trip_preserves_everything():
     assert restored.tree_id == tree.tree_id
     assert restored.title == "タイトル"
     assert restored.system_prompt == "プロンプト"
+    assert restored.summary == "要約テキスト"
+    assert restored.summary_upto_id == 1
     assert restored.current_id == node_id
     assert [n.content for n in restored.thread(node_id)] == [
         "q1", "ans1", "q2", "ans2", "with tools",
@@ -111,4 +114,6 @@ def test_from_dict_accepts_legacy_nodes_without_tool_messages():
     tree = ChatTree.from_dict(data)
     assert tree.title == ""
     assert tree.system_prompt == ""
+    assert tree.summary == ""
+    assert tree.summary_upto_id is None
     assert tree.thread(1)[0].tool_messages == ()

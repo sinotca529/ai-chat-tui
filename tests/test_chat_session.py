@@ -186,6 +186,100 @@ async def test_no_system_message_when_no_prompt(session, fake_api):
     assert fake_api.sent_messages[0]["role"] == "user"
 
 
+def _make_compaction_session(store, context_window: int | None) -> tuple[ChatSession, FakeApiHandler]:
+    api = FakeApiHandler(chunks=("応答です",))
+    session = ChatSession(
+        tree=ChatTree(), api=api, store=store, context_window=context_window,
+    )
+    return session, api
+
+
+async def test_no_compaction_without_context_window(store):
+    """context_window 未設定なら圧縮は一切行われない（opt-in）"""
+    session, api = _make_compaction_session(store, context_window=None)
+    for i in range(4):
+        await session.send_message("あ" * 200, _noop)
+    assert api.summarize_calls == []
+
+
+async def test_no_compaction_below_threshold(store):
+    session, api = _make_compaction_session(store, context_window=100_000)
+    for i in range(4):
+        await session.send_message(f"質問{i}", _noop)
+    assert api.summarize_calls == []
+
+
+async def test_compaction_replaces_old_messages_with_summary(store):
+    session, api = _make_compaction_session(store, context_window=500)
+    for i in range(4):
+        await session.send_message(f"質問{i}:" + "あ" * 60, _noop)
+
+    assert api.summarize_calls  # 閾値超過で要約が実行された
+    # 直近リクエスト: 要約入り system + 直近ノード（KEEP=4）+ 新規 user のみ
+    sent = api.sent_messages
+    assert sent[0]["role"] == "system"
+    assert "これまでの要約" in sent[0]["content"]
+    assert len(sent) <= 1 + 4 + 1
+    # 要約済みの古いメッセージは生では送られない
+    contents = [m.get("content", "") for m in sent[1:]]
+    assert not any("質問0" in c for c in contents)
+    # 表示スレッド（ツリー）は全ノードを保持したまま（append-only 維持）
+    assert len(session.current_thread()) == 8
+
+
+async def test_compaction_result_is_persisted(store):
+    session, api = _make_compaction_session(store, context_window=500)
+    for i in range(4):
+        await session.send_message(f"質問{i}:" + "あ" * 60, _noop)
+
+    loaded = store.load(session.tree_id)
+    assert loaded.summary == "これまでの要約"
+    assert loaded.summary_upto_id is not None
+
+
+async def test_recompaction_uses_previous_summary_incrementally(store):
+    session, api = _make_compaction_session(store, context_window=500)
+    for i in range(8):
+        await session.send_message(f"質問{i}:" + "あ" * 60, _noop)
+
+    assert len(api.summarize_calls) >= 2
+    # 2 回目以降の要約入力は旧要約から始まる（全履歴を再要約しない）
+    second_input = api.summarize_calls[1]
+    assert "これまでの要約" in second_input[0]["content"]
+
+
+async def test_summary_not_applied_on_other_branch(store):
+    session, api = _make_compaction_session(store, context_window=500)
+    for i in range(8):
+        await session.send_message(f"質問{i}:" + "あ" * 60, _noop)
+    assert api.summarize_calls
+    # 2 回目の圧縮で summary_upto_id は最初の往復より深いノードを指している
+    upto = store.load(session.tree_id).summary_upto_id
+    assert upto is not None and upto > 1
+
+    # 要約範囲より手前（最初の応答ノード）から分岐すると要約は使われない
+    session.navigate_to(session.current_thread()[1].node.id)
+    await session.send_message("分岐質問", _noop)
+
+    sent = api.sent_messages
+    assert all("これまでの要約" not in m.get("content", "") for m in sent)
+    assert any("質問0" in m.get("content", "") for m in sent)  # 手前のノードは生で送られる
+
+
+async def test_compaction_notice_shown_during_stream_but_not_saved(store):
+    session, api = _make_compaction_session(store, context_window=500)
+    for i in range(3):
+        await session.send_message(f"質問{i}:" + "あ" * 60, _noop)
+
+    seen: list[str] = []
+    await session.send_message(
+        "質問3:" + "あ" * 60, lambda: seen.append(session.streaming_text)
+    )
+    assert any(s.startswith("[コンテキストを圧縮しました]") for s in seen)
+    # 保存された応答本文には通知が混入しない
+    assert session.current_thread()[-1].node.content == "応答です"
+
+
 async def test_generate_title_saves_tree(session, store):
     await session.send_message("hi", _noop)
     title = await session.generate_title()
