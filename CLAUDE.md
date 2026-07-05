@@ -2,12 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 必須ルール（コンテキスト圧縮後も必ず遵守すること）
-
-**言語**: ユーザーへの応答は常に日本語で行う。コンテキスト圧縮後も例外なく日本語を維持する。
-
-**ブランチ規律（絶対厳守）**: 1 つの issue/機能/修正 = 1 ブランチ = 1 PR。複数の懸念事項を 1 ブランチに混在させてはならない。今取り組んでいる作業と直交する修正が必要になった場合は、必ず作業を中断して別ブランチを作成し、ユーザーに報告してから対処する。
-
 ## Running the app
 
 ```bash
