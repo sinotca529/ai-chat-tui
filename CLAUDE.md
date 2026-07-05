@@ -86,7 +86,7 @@ UI 層 → アプリケーション層 → ドメイン層
 
 **per-message Window アーキテクチャ**: メッセージ 1 件ごとに `Window` を作り `HSplit` に積む。`Window.style` をラムダにすることで行全体の背景色をロール・選択状態に応じて動的に制御する。サイドバー的な `[n/m]` 表示は `VSplit` で右端に配置。
 
-**ストリーミング**: `asyncio.ensure_future` でバックグラウンド実行。`ChatSession.send_message(msg, invalidate)` はコルーチンで、トークンを受け取るたびに `invalidate()` を呼んで差分再描画を促す。ストリーミング中は `ChatSession._pending_user_msg` / `_streaming_text` に状態を保持し、`ChatView` はこれを直接参照して `_pending_window` / `_stream_window` を表示する。ツリーへの書き込みはストリーミング完了後にのみ行われるため、キャンセルや API エラー時のロールバックは不要。`save()` 失敗時のみ `ChatTree.rollback()` を 2 回呼んで user / assistant ノードを取り消す。
+**ストリーミング**: `asyncio.ensure_future` でバックグラウンド実行。`ChatSession.send_message(msg, invalidate)` はコルーチンで、トークンを受け取るたびに `invalidate()` を呼んで差分再描画を促す。ストリーミング中は `ChatSession._pending_user_msg` / `_streaming_text` に状態を保持し、`ChatView` はこれを直接参照して `_pending_window` / `_stream_window` を表示する。ツリーへの書き込みはストリーミング完了後にのみ行われるため、キャンセルや API エラー時のロールバックは不要。`save()` 失敗時のみ `ChatTree.rollback()` を 2 回呼んで user / assistant ノードを取り消す。**ストリーミング開始前の不変条件**: `_pending_window` は `ChatView._rows`（`update()` で構築済みの行リスト）の末尾に追加される。そのためブランチ編集（`e` キー）経由で送信する場合は、`navigate_to` で `current_id` を分岐点に移動した直後に `_refresh_chat_view()` を呼び、`_rows` を分岐点までの状態に更新してからストリーミングを開始しなければならない。
 
 **タイトル自動生成**: 初回の AI 応答完了後にバックグラウンドで `ApiHandler.generate_title()` を呼び、結果を JSON に保存。未設定の場合は `tree_id` 先頭 16 文字で代替表示。
 
