@@ -2,10 +2,28 @@ import asyncio
 import json
 from dataclasses import dataclass, field
 from typing import AsyncIterator
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 from .tool_registry import ToolRegistry
 
 _MAX_TOOL_ROUNDS = 5
+
+
+def _strip_tool_messages(messages: list[dict]) -> list[dict]:
+    """ツール関連メッセージ（role:tool / tool_calls 付き assistant）を除去する。
+
+    ツール非対応サーバはこれらのメッセージ自体も拒否するため、
+    フォールバック送信時は履歴からも取り除く必要がある。
+    """
+    result: list[dict] = []
+    for m in messages:
+        if m.get("role") == "tool":
+            continue
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            if m.get("content"):
+                result.append({"role": "assistant", "content": m["content"]})
+            continue
+        result.append(m)
+    return result
 
 
 class ToolIndicator(str):
@@ -34,6 +52,8 @@ class ApiHandler:
             self._client = AsyncOpenAI(base_url=url, api_key=api_key)
         self._model = model
         self._registry = registry or ToolRegistry()
+        # None=未確認 / False=サーバがツール非対応（400 検出後のフォールバック済み）
+        self._tools_supported: bool | None = None
 
     @property
     def model(self) -> str:
@@ -65,8 +85,11 @@ class ApiHandler:
 
     async def stream(self, messages: list[dict]) -> AsyncIterator[str]:
         defs = self._registry.definitions()
-        tools = defs or None
+        tools = defs if (defs and self._tools_supported is not False) else None
         current_messages = list(messages)
+        if self._tools_supported is False:
+            # 過去にツール対応サーバで作られた履歴が混ざっていても送れるようにする
+            current_messages = _strip_tool_messages(current_messages)
         self._tool_message_log: list[dict] = []
 
         for _ in range(_MAX_TOOL_ROUNDS):
@@ -89,12 +112,26 @@ class ApiHandler:
     async def _stream_one_round(
         self, messages: list[dict], tools: list | None, out: _RoundResult
     ) -> AsyncIterator[str]:
-        response = await self._client.chat.completions.create(
-            model=self._model,
-            messages=messages,
-            stream=True,
-            **({"tools": tools} if tools else {}),
-        )
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=messages,
+                stream=True,
+                **({"tools": tools} if tools else {}),
+            )
+        except BadRequestError:
+            if not tools:
+                raise
+            # サーバがツール非対応の可能性: tools なし + ツール関連メッセージ除去で
+            # 1 回だけ再試行する。ここでも失敗する場合は tools 起因ではないので、
+            # その例外をそのまま伝播させる（対処療法で握りつぶさない）。
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=_strip_tool_messages(messages),
+                stream=True,
+            )
+            self._tools_supported = False
+            yield ToolIndicator("[サーバがツール非対応のためツールなしで再送信しました]\n")
         async for chunk in response:
             if not chunk.choices:
                 continue
