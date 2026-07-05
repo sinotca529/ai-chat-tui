@@ -67,6 +67,7 @@ class ApiHandler:
         defs = self._registry.definitions()
         tools = defs or None
         current_messages = list(messages)
+        self._tool_message_log: list[dict] = []
 
         for _ in range(_MAX_TOOL_ROUNDS):
             result = _RoundResult()
@@ -80,6 +81,10 @@ class ApiHandler:
             # ツールラウンド上限に達した場合、tools=None で最終テキスト応答を強制する
             async for token in self._stream_one_round(current_messages, None, _RoundResult()):
                 yield token
+
+    @property
+    def last_tool_messages(self) -> list[dict]:
+        return self._tool_message_log
 
     async def _stream_one_round(
         self, messages: list[dict], tools: list | None, out: _RoundResult
@@ -123,7 +128,7 @@ class ApiHandler:
             for _, tc in sorted(result.tool_calls.items())
         ]
 
-        messages.append({
+        asst_msg = {
             "role": "assistant",
             "content": "".join(result.content) or None,
             "tool_calls": [
@@ -131,7 +136,9 @@ class ApiHandler:
                  "function": {"name": name, "arguments": raw_args}}
                 for tool_id, name, raw_args, _ in sorted_tcs
             ],
-        })
+        }
+        messages.append(asst_msg)
+        self._tool_message_log.append(asst_msg)
 
         for _, name, _, args in sorted_tcs:
             entry = self._registry.get(name)
@@ -156,4 +163,6 @@ class ApiHandler:
             tool_id = sorted_tcs[i][0]
             content = f"Tool error: {outcome}" if isinstance(outcome, Exception) else outcome[1]
             yield ToolIndicator(f"{content}\n")
-            messages.append({"role": "tool", "tool_call_id": tool_id, "content": content})
+            tool_msg = {"role": "tool", "tool_call_id": tool_id, "content": content}
+            messages.append(tool_msg)
+            self._tool_message_log.append(tool_msg)

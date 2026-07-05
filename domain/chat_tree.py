@@ -43,9 +43,17 @@ class ChatTree:
     def set_current(self, node_id: int) -> None:
         self._current_id = node_id
 
-    def insert(self, parent_id: int | None, role: Role, content: str) -> int:
+    def insert(
+        self,
+        parent_id: int | None,
+        role: Role,
+        content: str,
+        tool_messages: tuple = (),
+    ) -> int:
         node_id = len(self._nodes)
-        self._nodes.append(Node(id=node_id, role=role, content=content, parent_id=parent_id))
+        self._nodes.append(
+            Node(id=node_id, role=role, content=content, parent_id=parent_id, tool_messages=tool_messages)
+        )
         return node_id
 
     def thread(self, node_id: int | None) -> list[Node]:
@@ -89,6 +97,7 @@ class ChatTree:
                     "role": n.role,
                     "content": n.content,
                     "parent_id": n.parent_id,
+                    "tool_messages": list(n.tool_messages),
                 }
                 for n in self._nodes
             ],
@@ -102,6 +111,7 @@ class ChatTree:
                 role=Role(n["role"]),
                 content=n["content"],
                 parent_id=n["parent_id"],
+                tool_messages=tuple(n.get("tool_messages", [])),
             )
             for n in data["nodes"]
         ]

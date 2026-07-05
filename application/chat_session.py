@@ -76,10 +76,11 @@ class ChatSession:
             self._store.save(self._tree)
 
     def _build_thread_messages(self) -> list[dict]:
-        messages = [
-            {"role": str(e.node.role), "content": e.node.content}
-            for e in self.current_thread()
-        ]
+        messages = []
+        for e in self.current_thread():
+            if e.node.tool_messages:
+                messages.extend(list(e.node.tool_messages))
+            messages.append({"role": str(e.node.role), "content": e.node.content})
         effective = self.effective_system_prompt
         if effective:
             messages = [{"role": "system", "content": effective}] + messages
@@ -103,8 +104,9 @@ class ChatSession:
             if not self._save_text:
                 return
 
+            tool_messages = tuple(self._api.last_tool_messages)
             user_id = self._tree.insert(self._tree.current_id, Role.USER, msg)
-            asst_id = self._tree.insert(user_id, Role.ASSISTANT, self._save_text)
+            asst_id = self._tree.insert(user_id, Role.ASSISTANT, self._save_text, tool_messages=tool_messages)
             self._tree.set_current(asst_id)
             try:
                 self._store.save(self._tree)
