@@ -177,6 +177,7 @@ class ChatApp:
             if self._branch_target_id is not None:
                 self._session.navigate_to(self._branch_target_id)
                 self._branch_target_id = None
+                self._refresh_chat_view()
             self._pending_message = msg
             self._session.prepare_streaming(msg)
             self._stream_task = asyncio.ensure_future(self._do_stream(msg))
