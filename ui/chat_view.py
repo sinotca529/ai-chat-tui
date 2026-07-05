@@ -206,10 +206,10 @@ class ChatView:
             text_style = "fg:ansiwhite" if is_selected else ""
 
         result.append((role_style, ">" if entry.role == Role.USER else "*"))
+        self._render_content(result, entry.content, text_style)
         for name, args in entry.tool_calls:
             arg_str = ", ".join(f"{v}" for v in args.values())
             result.append(("fg:ansiyellow", f"\n  [{name}: {arg_str}]"))
-        self._render_content(result, entry.content, text_style)
         result.append(("", "\n"))
         return result
 
