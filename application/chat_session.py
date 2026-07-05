@@ -34,6 +34,11 @@ class ChatSession:
     def set_stream_error(self, msg: str) -> None:
         self._error_text = msg
 
+    def prepare_streaming(self, msg: str) -> None:
+        """ストリーミング開始前に pending 状態を設定し、レイアウトに pending_window を出現させる。"""
+        self._pending_user_msg = msg
+        self._error_text = ""
+
     @property
     def tree_id(self) -> str:
         return self._tree.tree_id
