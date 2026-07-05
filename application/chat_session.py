@@ -119,7 +119,8 @@ class ChatSession:
             self._display_text = ""
             self._save_text = ""
 
-    def navigate_to(self, node_id: int) -> None:
+    def navigate_to(self, node_id: int | None) -> None:
+        """current を移動する。None はルート（ツリー先頭からの分岐）を表す。"""
         self._tree.set_current(node_id)
 
     def navigate_to_branch_end(self, node_id: int) -> None:

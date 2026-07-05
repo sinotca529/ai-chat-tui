@@ -141,6 +141,20 @@ async def test_branch_from_middle_creates_sibling(session, fake_api):
     assert branch_entry.sibling_index == 2
 
 
+async def test_navigate_to_none_branches_from_root(session):
+    """navigate_to(None) でルートに戻り、次の送信はルートの兄弟になる"""
+    await session.send_message("最初の質問", _noop)
+
+    session.navigate_to(None)
+    assert session.current_thread() == []
+
+    await session.send_message("別の最初の質問", _noop)
+    thread = session.current_thread()
+    assert [e.node.content for e in thread] == ["別の最初の質問", "Hi!"]
+    assert thread[0].sibling_count == 2
+    assert thread[0].sibling_index == 2
+
+
 async def test_navigate_to_branch_end_follows_firstborn_chain(session):
     await session.send_message("q1", _noop)
     end_id = session.current_thread()[-1].node.id

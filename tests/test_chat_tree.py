@@ -44,9 +44,21 @@ def test_siblings_with_self_sorted_by_id():
     assert tree.siblings_with_self(4) == [2, 4]
 
 
-def test_root_node_has_no_siblings():
+def test_root_nodes_are_siblings_of_each_other():
+    """parent_id=None のルートノード同士も兄弟として導出される"""
     tree = _build_branched_tree()
-    assert tree.siblings_with_self(0) == [0]
+    assert tree.siblings_with_self(0) == [0]  # ルートが 1 つなら自身のみ
+
+    second_root = tree.insert(None, Role.USER, "another root")
+    assert tree.siblings_with_self(0) == [0, second_root]
+    assert tree.siblings_with_self(second_root) == [0, second_root]
+
+
+def test_set_current_none_returns_to_root():
+    tree = _build_branched_tree()
+    tree.set_current(None)
+    assert tree.current_id is None
+    assert tree.thread(tree.current_id) == []
 
 
 def test_rollback_pops_tail_and_resets_current_to_parent():
