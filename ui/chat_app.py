@@ -30,6 +30,9 @@ class ChatApp:
         self._session = session
         self._mode: _Mode = "input"
         self._streaming = False
+        # ブランチ編集中かどうか。分岐先が None（ルート）の場合があるため
+        # _branch_target_id の None チェックでは編集中かを判定できない。
+        self._branch_editing = False
         self._branch_target_id: int | None = None
         self._stream_task: asyncio.Task | None = None
         self._pending_message: str = ""
@@ -174,8 +177,9 @@ class ChatApp:
                 return
             self._input_area.text = ""
             self._streaming = True
-            if self._branch_target_id is not None:
+            if self._branch_editing:
                 self._session.navigate_to(self._branch_target_id)
+                self._branch_editing = False
                 self._branch_target_id = None
                 self._refresh_chat_view()
             self._pending_message = msg
@@ -192,7 +196,8 @@ class ChatApp:
 
         @kb.add("escape", filter=is_input)
         def _cancel_branch(event):
-            if self._branch_target_id is not None:
+            if self._branch_editing:
+                self._branch_editing = False
                 self._branch_target_id = None
                 self._input_area.text = ""
 
@@ -258,6 +263,7 @@ class ChatApp:
             if entry is None or entry.node.role != Role.USER:
                 return
             self._input_area.text = entry.node.content
+            self._branch_editing = True
             self._branch_target_id = entry.node.parent_id
             self._mode = "input"
             self._chat_view.set_browse_mode(False)
@@ -267,6 +273,7 @@ class ChatApp:
         @kb.add("c-n", filter=~is_any_overlay & not_streaming)
         def _new_chat(event):
             self._session.new_tree()
+            self._branch_editing = False
             self._branch_target_id = None
             self._mode = "input"
             self._chat_view.set_browse_mode(False)
@@ -303,6 +310,7 @@ class ChatApp:
                 self._session.new_tree()
             else:
                 self._session.load_tree(tree_id)
+            self._branch_editing = False
             self._branch_target_id = None
             self._mode = "input"
             self._chat_view.set_browse_mode(False)
@@ -396,7 +404,7 @@ class ChatApp:
     def _input_prefix(self, lineno: int, wrap_count: int):
         if lineno > 0 or wrap_count > 0:
             return [("", "  ")]
-        if self._branch_target_id is not None:
+        if self._branch_editing:
             return [("fg:ansiyellow bold", "e ")]
         return [("", "> ")]
 

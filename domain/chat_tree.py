@@ -40,7 +40,8 @@ class ChatTree:
     def current_id(self) -> int | None:
         return self._current_id
 
-    def set_current(self, node_id: int) -> None:
+    def set_current(self, node_id: int | None) -> None:
+        """current_id を移動する。None はルート（最初のメッセージの直前）を表す。"""
         self._current_id = node_id
 
     def insert(
@@ -72,10 +73,9 @@ class ChatTree:
         return [n.id for n in self._nodes if n.parent_id == node_id]
 
     def siblings_with_self(self, node_id: int) -> list[int]:
-        """同じ親を持つノードの ID リスト（自身を含む、ID 昇順）"""
+        """同じ親を持つノードの ID リスト（自身を含む、ID 昇順）。
+        ルートノード（parent_id=None）同士も兄弟として扱う。"""
         parent_id = self._nodes[node_id].parent_id
-        if parent_id is None:
-            return [node_id]
         return [n.id for n in self._nodes if n.parent_id == parent_id]
 
     def rollback(self) -> None:
