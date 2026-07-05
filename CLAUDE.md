@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **ブランチ規律（絶対厳守）**: 1 つの issue/機能/修正 = 1 ブランチ = 1 PR。複数の懸念事項を 1 ブランチに混在させてはならない。今取り組んでいる作業と直交する修正が必要になった場合は、必ず作業を中断して別ブランチを作成し、ユーザーに報告してから対処する。
 
-**仕様の文書化**: 新しい仕様・設計上の不変条件・挙動が追加・変更された際は、実装と同時に CLAUDE.md の該当箇所を更新すること。コードだけ変えて CLAUDE.md を放置してはならない。
+**仕様の文書化**: 新しい仕様・設計上の不変条件・挙動を追加・変更するコミットには、必ず同一コミット内に CLAUDE.md の更新を含めること。CLAUDE.md を更新せずに仕様変更コミットを作ってはならない。コミット前に「このコミットは挙動を変えるか？」を自問し、Yes なら CLAUDE.md をステージに加えてから commit する。
 
 **警告・エラーの扱い**: 警告やエラーが発生した場合は必ず根本原因を調査すること。`warnings.filterwarnings` や `try/except` で症状を隠す対処療法を根本原因の究明より先に行ってはならない。
 
@@ -56,7 +56,7 @@ UI 層 → アプリケーション層 → ドメイン層
 
 **ドメイン層 (`domain/`)**
 - `role.py` — `Role` (StrEnum: USER / ASSISTANT)
-- `node.py` — `Node` (frozen dataclass: id, role, content, parent_id)
+- `node.py` — `Node` (frozen dataclass: id, role, content, parent_id, tool_messages)。`tool_messages` はツール呼び出しを伴う ASSISTANT ノードに付与される中間 API メッセージ列（`role: assistant/tool` のメッセージ）。表示には使わず、スレッド再構築時に最終応答の直前に注入してコンテキストを維持する。
 - `chat_tree.py` — `ChatTree`: append-only ツリー。子・兄弟は `parent_id` から導出。`title` / `system_prompt` フィールドを持つ。`rollback()` で末尾ノードを pop し `current_id` を親に戻す。
 
 **アプリケーション層 (`application/`)**
@@ -65,11 +65,11 @@ UI 層 → アプリケーション層 → ドメイン層
 
 **インフラストラクチャ層 (`infrastructure/`)**
 - `chat_tree_store.py` — `ChatTreeStore`: `ChatTree` を JSON ファイルとして保存・読み込み・削除。`list_trees()` は `(tree_id, title)` ペアを返す。
-- `api_handler.py` — `ApiHandler`: `AsyncOpenAI` ラッパー。`stream()` / `generate_title()` / `list_models()` / `set_model()`。
+- `api_handler.py` — `ApiHandler`: `AsyncOpenAI` ラッパー。`stream()` / `generate_title()` / `list_models()` / `set_model()`。`stream()` 完了後に `last_tool_messages` でツール呼び出しの中間メッセージ列を取得できる。ツール実行は `asyncio.to_thread` で行う（同期ツール）。
 
 **UI 層 (`ui/`)**
 - `chat_app.py` — `ChatApp`: top-level。モード管理・キーバインド・ストリーミング制御。
-- `chat_view.py` — `ChatView`: メッセージごとに `Window` を生成し `HSplit` に積む。`ScrollablePane` + `DynamicContainer` でラップ。ブラウズモードのカーソルも管理。自身に状態は持たず、`ChatSession` を参照して描画する。
+- `chat_view.py` — `ChatView`: メッセージごとに `Window` を生成し `HSplit` に積む。`ScrollablePane` + `DynamicContainer` でラップ。ブラウズモードのカーソルも管理。自身に状態は持たず、`ChatSession` を参照して描画する。内部の `_RowEntry` は `node.tool_messages` からツール呼び出し情報 `(name, args)` を抽出して保持し、メッセージ本文の後に改行して `[name: args]` の形式で黄色表示する（`fg:ansiyellow`）。
 - `highlight.py` — コードブロックのパース (`iter_content`) と Pygments によるハイライト (`highlight_code`)。
 - `tree_select_overlay.py` — `TreeSelectOverlay`: 保存済みツリーの選択・削除 UI。
 - `model_select_overlay.py` — `ModelSelectOverlay`: モデル一覧の選択 UI（非同期ロード）。

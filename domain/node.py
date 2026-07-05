@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from domain.role import Role
 
 
@@ -8,3 +8,4 @@ class Node:
     role: Role
     content: str
     parent_id: int | None
+    tool_messages: tuple = field(default=(), compare=False, hash=False)

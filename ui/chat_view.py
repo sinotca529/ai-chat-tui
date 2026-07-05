@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from prompt_toolkit.data_structures import Point
@@ -21,14 +22,26 @@ class _RowEntry:
     content: str
     sibling_index: int
     sibling_count: int
+    tool_calls: tuple = ()  # (name, args_dict) のタプル列
 
     @classmethod
     def from_thread_entry(cls, e: ThreadEntry) -> "_RowEntry":
+        tool_calls: list[tuple[str, dict]] = []
+        for msg in e.node.tool_messages:
+            if msg.get("role") == "assistant":
+                for tc in msg.get("tool_calls") or []:
+                    name = tc["function"]["name"]
+                    try:
+                        args = json.loads(tc["function"]["arguments"])
+                    except Exception:
+                        args = {}
+                    tool_calls.append((name, args))
         return cls(
             role=e.node.role,
             content=e.node.content,
             sibling_index=e.sibling_index,
             sibling_count=e.sibling_count,
+            tool_calls=tuple(tool_calls),
         )
 
 
@@ -194,6 +207,9 @@ class ChatView:
 
         result.append((role_style, ">" if entry.role == Role.USER else "*"))
         self._render_content(result, entry.content, text_style)
+        for name, args in entry.tool_calls:
+            arg_str = ", ".join(f"{v}" for v in args.values())
+            result.append(("fg:ansiyellow", f"\n  [{name}: {arg_str}]"))
         result.append(("", "\n"))
         return result
 

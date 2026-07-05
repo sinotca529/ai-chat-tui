@@ -2,7 +2,7 @@ from collections.abc import Callable
 from domain.chat_tree import ChatTree
 from domain.role import Role
 from application.thread_entry import ThreadEntry
-from infrastructure.api_handler import ApiHandler
+from infrastructure.api_handler import ApiHandler, ToolIndicator
 from infrastructure.chat_tree_store import ChatTreeStore
 
 
@@ -18,14 +18,15 @@ class ChatSession:
         self._api = api
         self._store = store
         self._default_system_prompt = default_system_prompt
-        self._streaming_text: str = ""
+        self._display_text: str = ""   # 表示用（ToolIndicator を含む）
+        self._save_text: str = ""       # 保存用（ToolIndicator を除くテキストのみ）
         self._pending_user_msg: str | None = None
         self._error_text: str = ""
 
     @property
     def streaming_text(self) -> str:
-        """ストリーミング中のテキスト、またはエラーメッセージ。"""
-        return self._streaming_text or self._error_text
+        """ストリーミング中のテキスト（ToolIndicator 含む）、またはエラーメッセージ。"""
+        return self._display_text or self._error_text
 
     @property
     def pending_user_msg(self) -> str | None:
@@ -75,10 +76,11 @@ class ChatSession:
             self._store.save(self._tree)
 
     def _build_thread_messages(self) -> list[dict]:
-        messages = [
-            {"role": str(e.node.role), "content": e.node.content}
-            for e in self.current_thread()
-        ]
+        messages = []
+        for e in self.current_thread():
+            if e.node.tool_messages:
+                messages.extend(list(e.node.tool_messages))
+            messages.append({"role": str(e.node.role), "content": e.node.content})
         effective = self.effective_system_prompt
         if effective:
             messages = [{"role": "system", "content": effective}] + messages
@@ -88,19 +90,23 @@ class ChatSession:
         thread_messages = self._build_thread_messages()
         self._error_text = ""
         self._pending_user_msg = msg
-        self._streaming_text = ""
+        self._display_text = ""
+        self._save_text = ""
         try:
             async for chunk in self._api.stream(
                 thread_messages + [{"role": "user", "content": msg}]
             ):
-                self._streaming_text += chunk
+                self._display_text += chunk
+                if not isinstance(chunk, ToolIndicator):
+                    self._save_text += chunk
                 invalidate()
 
-            if not self._streaming_text:
+            if not self._save_text:
                 return
 
+            tool_messages = tuple(self._api.last_tool_messages)
             user_id = self._tree.insert(self._tree.current_id, Role.USER, msg)
-            asst_id = self._tree.insert(user_id, Role.ASSISTANT, self._streaming_text)
+            asst_id = self._tree.insert(user_id, Role.ASSISTANT, self._save_text, tool_messages=tool_messages)
             self._tree.set_current(asst_id)
             try:
                 self._store.save(self._tree)
@@ -110,7 +116,8 @@ class ChatSession:
                 raise
         finally:
             self._pending_user_msg = None
-            self._streaming_text = ""
+            self._display_text = ""
+            self._save_text = ""
 
     def navigate_to(self, node_id: int) -> None:
         self._tree.set_current(node_id)
