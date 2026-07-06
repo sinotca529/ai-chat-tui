@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from application.chat_session import ChatSession
 from infrastructure.api_handler import ApiHandler
 from infrastructure.chat_tree_store import ChatTreeStore
+from infrastructure.current_datetime import get_current_datetime
 from infrastructure.tool_registry import ToolRegistry
 from infrastructure.web_fetch import fetch_page
 from infrastructure.web_search import web_search
@@ -32,7 +33,7 @@ async def main() -> None:
     default_system_prompt = config.get("system", {}).get("prompt", "")
 
     registry = ToolRegistry()
-    registry.register(web_search, fetch_page)
+    registry.register(web_search, fetch_page, get_current_datetime)
 
     store = ChatTreeStore(save_dir)
     api = ApiHandler(url=url, api_key=api_key, model=model, api_key_header=api_key_header, registry=registry)
