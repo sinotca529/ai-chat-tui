@@ -240,6 +240,37 @@ async def test_browse_mode_disables_autoscroll_until_next_send(store):
         assert app._chat_view.window.stick_to_bottom
 
 
+async def test_enter_does_not_copy_indent(store):
+    """Enter は自動インデント（copy_margin）しない。
+
+    非ブラケットペーストでは改行が 1 つずつ Enter として処理されるため、
+    copy_margin が有効だと貼り付けたコードのインデントが階段状に重なる。
+    """
+    api = FakeApiHandler()
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text("    indented line")
+        pipe.send_text("\r")  # Enter
+        pipe.send_text("next line")
+        await _wait_for(
+            lambda: app._input_area.text == "    indented line\nnext line"
+        )
+
+
+async def test_bracketed_paste_inserts_verbatim(store):
+    """ブラケットペーストは改行・インデント・タブを原文のまま挿入する"""
+    api = FakeApiHandler()
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    pasted = "def f():\n    if x:\n\t\treturn 1"
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text("\x1b[200~" + pasted + "\x1b[201~")
+        await _wait_for(lambda: app._input_area.text == pasted)
+        # ペースト内のタブや改行がキーバインドとして解釈されない
+        assert app._mode == "input"
+
+
 async def test_ghost_text_hidden_once_typing_starts(store):
     api = FakeApiHandler()
     session = ChatSession(tree=ChatTree(), api=api, store=store)
