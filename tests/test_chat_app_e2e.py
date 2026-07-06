@@ -240,6 +240,42 @@ async def test_browse_mode_disables_autoscroll_until_next_send(store):
         assert app._chat_view.window.stick_to_bottom
 
 
+async def test_enter_does_not_copy_indent(store):
+    """Enter は自動インデント（copy_margin）しない。
+
+    非ブラケットペーストでは改行が 1 つずつ Enter として処理されるため、
+    copy_margin が有効だと貼り付けたコードのインデントが階段状に重なる。
+    """
+    api = FakeApiHandler()
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text("    indented line")
+        pipe.send_text("\r")  # Enter
+        pipe.send_text("next line")
+        await _wait_for(
+            lambda: app._input_area.text == "    indented line\nnext line"
+        )
+
+
+async def test_non_bracketed_paste_preserves_indentation(store):
+    """非ブラケットペーストでインデント付きコードが原文どおり貼り付くこと。
+
+    ブラケットペーストが効かない端末経路では、貼り付けは生のキー入力の
+    連続として届き、改行は CR として送られる。インデントの増減を含む
+    コードでその経路を再現する（copy_margin が有効だと前行のインデントが
+    各行にコピーされ、階段状に崩れて失敗する）。
+    """
+    api = FakeApiHandler()
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    code = "def f(x):\n    if x:\n        return 1\n    return 0"
+    async with _running_app(session) as (app, pipe):
+        # 端末が改行を CR として送る非ブラケットペーストのキー列
+        pipe.send_text(code.replace("\n", "\r"))
+        await _wait_for(lambda: app._input_area.text == code)
+
+
 async def test_ghost_text_hidden_once_typing_starts(store):
     api = FakeApiHandler()
     session = ChatSession(tree=ChatTree(), api=api, store=store)

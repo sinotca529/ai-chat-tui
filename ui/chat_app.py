@@ -169,6 +169,14 @@ class ChatApp:
         def _quit(event):
             event.app.exit()
 
+        @kb.add("enter", filter=is_input)
+        def _newline(event):
+            # デフォルトの Enter は copy_margin=True（現在行の先頭空白を新しい行へ
+            # コピーする自動インデント）で、非ブラケットペースト時に改行が 1 つずつ
+            # Enter として処理されるとインデントが階段状に重なる。チャット入力に
+            # 自動インデントは不要なので無効化する。
+            event.current_buffer.newline(copy_margin=False)
+
         @kb.add("c-a", filter=is_input)
         def _beginning_of_line(event):
             buf = event.current_buffer
