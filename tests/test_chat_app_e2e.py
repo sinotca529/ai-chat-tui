@@ -259,7 +259,13 @@ async def test_enter_does_not_copy_indent(store):
 
 
 async def test_bracketed_paste_inserts_verbatim(store):
-    """ブラケットペーストは改行・インデント・タブを原文のまま挿入する"""
+    """ブラケットペーストは改行・インデント・タブを原文のまま挿入する。
+
+    注: これは copy_margin 修正の検証ではない（ブラケットペーストは Enter
+    バインドを通らないため修正の有無と無関係に通る）。デフォルトバインドと
+    カスタムバインドの合成で成り立つペースト経路の不変条件を、将来の
+    キーバインド変更から守るための characterization test。
+    """
     api = FakeApiHandler()
     session = ChatSession(tree=ChatTree(), api=api, store=store)
 
