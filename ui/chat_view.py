@@ -59,6 +59,10 @@ class AutoScrollPane(ScrollablePane):
     def __init__(self, content: DynamicContainer) -> None:
         super().__init__(content)
         self.stick_to_bottom = True
+        # 直近の描画時のジオメトリ。手動スクロールのクランプに使う。
+        # レイアウト構造（入力欄の高さ等）をここ以外が知る必要をなくす。
+        self._viewport_height = 0
+        self._content_height = 0
 
     def write_to_screen(
         self,
@@ -69,18 +73,27 @@ class AutoScrollPane(ScrollablePane):
         erase_bg: bool,
         z_index: int | None,
     ) -> None:
+        virtual_width = write_position.width - (1 if self.show_scrollbar() else 0)
+        virtual_height = max(
+            self.content.preferred_height(
+                virtual_width, self.max_available_height
+            ).preferred,
+            write_position.height,
+        )
+        self._viewport_height = write_position.height
+        self._content_height = virtual_height
         if self.stick_to_bottom:
-            virtual_width = write_position.width - (1 if self.show_scrollbar() else 0)
-            virtual_height = max(
-                self.content.preferred_height(
-                    virtual_width, self.max_available_height
-                ).preferred,
-                write_position.height,
-            )
             self.vertical_scroll = virtual_height - write_position.height
         super().write_to_screen(
             screen, mouse_handlers, write_position, parent_style, erase_bg, z_index
         )
+
+    def scroll_line_up(self) -> None:
+        self.vertical_scroll = max(0, self.vertical_scroll - 1)
+
+    def scroll_line_down(self) -> None:
+        max_scroll = max(0, self._content_height - self._viewport_height)
+        self.vertical_scroll = min(self.vertical_scroll + 1, max_scroll)
 
 
 class ChatView:
@@ -140,6 +153,16 @@ class ChatView:
             self._content_windows.append(content_win)
         if self._cursor_index >= len(entries):
             self._cursor_index = -1
+
+    def set_follow_bottom(self, follow: bool) -> None:
+        """下端オートスクロール追従の ON/OFF。"""
+        self.window.stick_to_bottom = follow
+
+    def scroll_line_up(self) -> None:
+        self.window.scroll_line_up()
+
+    def scroll_line_down(self) -> None:
+        self.window.scroll_line_down()
 
     def set_browse_mode(self, enabled: bool) -> None:
         self._browse_mode = enabled
