@@ -38,7 +38,7 @@ class ChatApp:
         self._stream_task: asyncio.Task | None = None
         self._pending_message: str = ""
 
-        self._chat_view = ChatView(self._session)
+        self._chat_view = ChatView(self._session, is_browse=lambda: self._mode == "browse")
         self._tree_overlay = TreeSelectOverlay()
         self._model_overlay = ModelSelectOverlay()
         self._system_overlay = SystemPromptOverlay()
@@ -230,7 +230,7 @@ class ChatApp:
             self._mode = "browse"
             # 過去メッセージを読むモードに入るので下端追従を止める
             self._chat_view.set_follow_bottom(False)
-            self._chat_view.set_browse_mode(True)
+            self._chat_view.init_browse_cursor()
             win = self._chat_view.selected_content_window()
             if win:
                 event.app.layout.focus(win)
@@ -246,7 +246,6 @@ class ChatApp:
         @kb.add("escape", filter=is_browse)
         def _to_input(event):
             self._mode = "input"
-            self._chat_view.set_browse_mode(False)
             event.app.layout.focus(self._input_area)
 
         @kb.add("c-y", filter=is_browse)
@@ -303,7 +302,6 @@ class ChatApp:
             self._branch_editing = True
             self._branch_target_id = entry.node.parent_id
             self._mode = "input"
-            self._chat_view.set_browse_mode(False)
             event.app.layout.focus(self._input_area)
 
         # 新規チャット
@@ -314,7 +312,6 @@ class ChatApp:
             self._branch_target_id = None
             self._chat_view.set_follow_bottom(True)
             self._mode = "input"
-            self._chat_view.set_browse_mode(False)
             self._refresh_chat_view()
             event.app.layout.focus(self._input_area)
 
@@ -352,7 +349,6 @@ class ChatApp:
             self._branch_target_id = None
             self._chat_view.set_follow_bottom(True)  # 末尾（最新メッセージ）を表示
             self._mode = "input"
-            self._chat_view.set_browse_mode(False)
             self._refresh_chat_view()
             event.app.layout.focus(self._input_area)
 

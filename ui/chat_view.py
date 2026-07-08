@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from prompt_toolkit.data_structures import Point
@@ -97,11 +98,17 @@ class AutoScrollPane(ScrollablePane):
 
 
 class ChatView:
-    def __init__(self, session: ChatSession) -> None:
+    def __init__(
+        self,
+        session: ChatSession,
+        is_browse: Callable[[], bool] | None = None,
+    ) -> None:
         self._session = session
         self._entries: list[ThreadEntry] = []
         self._cursor_index: int = -1
-        self._browse_mode: bool = False
+        # browse 状態の単一情報源は ChatApp._mode。自前の写しは持たず、
+        # 描画のたびにコールバックで参照する（手動同期による乖離を防ぐ）。
+        self._is_browse = is_browse or (lambda: False)
         self._rows: list = []
         self._content_windows: list[Window] = []
 
@@ -164,9 +171,9 @@ class ChatView:
     def scroll_line_down(self) -> None:
         self.window.scroll_line_down()
 
-    def set_browse_mode(self, enabled: bool) -> None:
-        self._browse_mode = enabled
-        if enabled and self._cursor_index < 0:
+    def init_browse_cursor(self) -> None:
+        """browse モード進入時、カーソル未設定なら末尾メッセージに置く"""
+        if self._cursor_index < 0:
             self._cursor_index = max(0, len(self._entries) - 1)
 
     def selected_entry(self) -> ThreadEntry | None:
@@ -213,7 +220,7 @@ class ChatView:
     # ── 行スタイル ────────────────────────────────────────────────────────────
 
     def _row_style(self, index: int, role: Role) -> str:
-        if self._browse_mode and index == self._cursor_index:
+        if self._is_browse() and index == self._cursor_index:
             return "bg:#1e4272"
         if role == Role.USER:
             return "bg:#1e1e1e"
@@ -239,7 +246,7 @@ class ChatView:
             ind_text = f"[{entry.sibling_index}/{entry.sibling_count}]"
             ind_ctrl = FormattedTextControl(
                 text=lambda e=entry, i=index: [(
-                    "fg:ansiwhite" if (self._browse_mode and i == self._cursor_index) else "fg:ansiyellow",
+                    "fg:ansiwhite" if (self._is_browse() and i == self._cursor_index) else "fg:ansiyellow",
                     f"[{e.sibling_index}/{e.sibling_count}]",
                 )],
             )
@@ -257,7 +264,7 @@ class ChatView:
 
     def _render_entry(self, entry: _RowEntry, index: int) -> StyleAndTextTuples:
         result: StyleAndTextTuples = []
-        is_selected = self._browse_mode and index == self._cursor_index
+        is_selected = self._is_browse() and index == self._cursor_index
 
         if entry.role == Role.USER:
             role_style = "bold fg:ansiwhite" if is_selected else "bold fg:ansibrightcyan"

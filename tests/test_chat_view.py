@@ -82,7 +82,7 @@ def test_cursor_starts_at_last_entry_and_wraps_to_sentinel():
         _entry(1, Role.ASSISTANT, "a", parent_id=0),
         _entry(2, Role.USER, "q2", parent_id=1),
     ])
-    view.set_browse_mode(True)
+    view.init_browse_cursor()
     assert view.selected_entry().node.id == 2
 
     view.move_cursor_up()
@@ -97,9 +97,21 @@ def test_cursor_starts_at_last_entry_and_wraps_to_sentinel():
 def test_cursor_reset_when_entries_shrink():
     view = _view()
     view.update([_entry(0, Role.USER, "q"), _entry(1, Role.ASSISTANT, "a", parent_id=0)])
-    view.set_browse_mode(True)
+    view.init_browse_cursor()
     view.update([_entry(0, Role.USER, "q")])  # ブランチ切替などで行数が減る
     assert view.selected_entry() is None  # 範囲外カーソルは破棄される
+
+
+def test_selection_style_follows_injected_browse_state():
+    """browse 状態は外部（ChatApp._mode）が単一情報源で、ChatView は写しを持たない"""
+    browse = {"on": False}
+    view = ChatView(_fake_session(), is_browse=lambda: browse["on"])
+    view.update([_entry(0, Role.USER, "q")])
+    view.init_browse_cursor()
+
+    assert view._row_style(0, Role.USER) == "bg:#1e1e1e"  # input 中は選択ハイライトなし
+    browse["on"] = True
+    assert view._row_style(0, Role.USER) == "bg:#1e4272"  # browse に入った瞬間から反映
 
 
 def test_set_cursor_to_node():
