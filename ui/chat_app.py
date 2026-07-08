@@ -65,6 +65,8 @@ class ChatApp:
             wrap_lines=True,
             get_line_prefix=self._input_prefix,
         )
+        # 外部エディタ編集時の一時ファイル拡張子（エディタ側でハイライトが効く）
+        self._input_area.buffer.tempfile_suffix = ".md"
 
         # 入力欄が空のときだけ表示するゴーストテキスト（カーソル位置に追従する Float）
         self._is_input_empty = Condition(
@@ -168,6 +170,13 @@ class ChatApp:
         @kb.add("c-q")
         def _quit(event):
             event.app.exit()
+
+        @kb.add("c-x", "c-e", filter=is_input & not_streaming)
+        def _open_in_editor(event):
+            # $VISUAL / $EDITOR で入力中のメッセージを編集する（bash の
+            # edit-and-execute-command と同じキー）。保存して閉じると
+            # 内容が入力欄に反映される。送信は従来どおり Ctrl+D で行う。
+            event.current_buffer.open_in_editor()
 
         @kb.add("enter", filter=is_input)
         def _newline(event):

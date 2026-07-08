@@ -276,6 +276,47 @@ async def test_non_bracketed_paste_preserves_indentation(store):
         await _wait_for(lambda: app._input_area.text == code)
 
 
+async def test_external_editor_roundtrip(store, tmp_path, monkeypatch):
+    """Ctrl+X Ctrl+E で $VISUAL のエディタが起動し、下書きが渡って
+    保存内容が入力欄に反映されること（git のコミットメッセージと同じ流儀）。
+    """
+    editor = tmp_path / "fake_editor.sh"
+    editor.write_text('#!/bin/sh\nprintf \'edited:%s\' "$(cat "$1")" > "$1"\n')
+    editor.chmod(0o755)
+    monkeypatch.setenv("VISUAL", str(editor))
+
+    api = FakeApiHandler()
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text("下書き")
+        await _wait_for(lambda: app._input_area.text == "下書き")
+        pipe.send_text("\x18\x05")  # Ctrl+X Ctrl+E
+        # 偽エディタが「edited:下書き」に書き換えた内容が反映される
+        await _wait_for(lambda: app._input_area.text == "edited:下書き")
+        # 自動送信はされない（送信は従来どおり Ctrl+D）
+        assert session.current_thread() == []
+        assert app._mode == "input"
+
+
+async def test_external_editor_failure_keeps_input(store, tmp_path, monkeypatch):
+    """エディタが異常終了（非ゼロ exit）した場合は入力欄を変更しない"""
+    editor = tmp_path / "failing_editor.sh"
+    editor.write_text('#!/bin/sh\nprintf "junk" > "$1"\nexit 1\n')
+    editor.chmod(0o755)
+    monkeypatch.setenv("VISUAL", str(editor))
+
+    api = FakeApiHandler()
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text("元の下書き")
+        await _wait_for(lambda: app._input_area.text == "元の下書き")
+        pipe.send_text("\x18\x05")  # Ctrl+X Ctrl+E
+        await asyncio.sleep(0.5)  # エディタ実行の完了を待つ
+        assert app._input_area.text == "元の下書き"
+
+
 async def test_ghost_text_hidden_once_typing_starts(store):
     api = FakeApiHandler()
     session = ChatSession(tree=ChatTree(), api=api, store=store)
