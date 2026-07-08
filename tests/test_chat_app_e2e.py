@@ -219,6 +219,50 @@ async def test_autoscroll_after_response_completes(store):
         await _wait_for(lambda: app._chat_view.window.vertical_scroll > 0)
 
 
+async def _settled_scroll(app) -> int:
+    """スクロール位置が 2 回連続で同値になる（描画が安定する）まで待って返す"""
+    last = -1
+    while True:
+        cur = app._chat_view.window.vertical_scroll
+        if cur == last:
+            return cur
+        last = cur
+        await asyncio.sleep(0.1)
+
+
+async def test_browse_manual_scroll_moves_one_line(store):
+    """browse モードの Ctrl+Y / Ctrl+E が 1 行ずつスクロールし、上端で止まること。
+
+    注: browse 進入時は選択メッセージの先頭が見える位置までスクロールが
+    調整される（既存挙動）ため、絶対位置ではなく相対移動を検証する。
+    """
+    api = FakeApiHandler(chunks=("行\n" * 60,))
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text("長い応答をください")
+        pipe.send_text(CTRL_D)
+        await _wait_for(lambda: len(session.current_thread()) == 2)
+        await _wait_for(lambda: app._chat_view.window.vertical_scroll > 0)
+
+        pipe.send_text(TAB)  # browse モード（追従 OFF）
+        await _wait_for(lambda: app._mode == "browse")
+        start = await asyncio.wait_for(_settled_scroll(app), timeout=5)
+
+        pipe.send_text("\x05")  # Ctrl+E: 1 行下へ
+        await _wait_for(lambda: app._chat_view.window.vertical_scroll == start + 1)
+        pipe.send_text("\x19")  # Ctrl+Y: 1 行上へ
+        await _wait_for(lambda: app._chat_view.window.vertical_scroll == start)
+
+        # 上端まで戻してさらに Ctrl+Y しても 0 で止まる
+        for _ in range(start + 2):
+            pipe.send_text("\x19")
+        await _wait_for(lambda: app._chat_view.window.vertical_scroll == 0)
+        pipe.send_text("\x19")
+        await asyncio.sleep(0.2)
+        assert app._chat_view.window.vertical_scroll == 0
+
+
 async def test_browse_mode_disables_autoscroll_until_next_send(store):
     api = FakeApiHandler()
     session = ChatSession(tree=ChatTree(), api=api, store=store)

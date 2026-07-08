@@ -38,7 +38,7 @@ class ChatApp:
         self._stream_task: asyncio.Task | None = None
         self._pending_message: str = ""
 
-        self._chat_view = ChatView(self._session)
+        self._chat_view = ChatView(self._session, is_browse=lambda: self._mode == "browse")
         self._tree_overlay = TreeSelectOverlay()
         self._model_overlay = ModelSelectOverlay()
         self._system_overlay = SystemPromptOverlay()
@@ -215,7 +215,7 @@ class ChatApp:
                 return
             self._input_area.text = ""
             self._streaming = True
-            self._chat_view.window.stick_to_bottom = True
+            self._chat_view.set_follow_bottom(True)
             if self._branch_editing:
                 self._session.navigate_to(self._branch_target_id)
                 self._branch_editing = False
@@ -229,8 +229,8 @@ class ChatApp:
         def _to_browse(event):
             self._mode = "browse"
             # 過去メッセージを読むモードに入るので下端追従を止める
-            self._chat_view.window.stick_to_bottom = False
-            self._chat_view.set_browse_mode(True)
+            self._chat_view.set_follow_bottom(False)
+            self._chat_view.init_browse_cursor()
             win = self._chat_view.selected_content_window()
             if win:
                 event.app.layout.focus(win)
@@ -246,24 +246,19 @@ class ChatApp:
         @kb.add("escape", filter=is_browse)
         def _to_input(event):
             self._mode = "input"
-            self._chat_view.set_browse_mode(False)
             event.app.layout.focus(self._input_area)
 
         @kb.add("c-y", filter=is_browse)
         def _scroll_up(event):
+            # ペイン内の Window からフォーカスを外し、手動スクロールが
+            # keep_focused_window_visible に上書きされないようにする
             event.app.layout.focus(self._input_area)
-            pane = self._chat_view.window
-            pane.vertical_scroll = max(0, pane.vertical_scroll - 1)
+            self._chat_view.scroll_line_up()
 
         @kb.add("c-e", filter=is_browse)
         def _scroll_down(event):
             event.app.layout.focus(self._input_area)
-            pane = self._chat_view.window
-            size = event.app.output.get_size()
-            pane_height = max(1, size.rows - 9)  # separator(1) + input_area(8)
-            content_height = pane.content.preferred_height(size.columns, 10000).preferred
-            max_scroll = max(0, content_height - pane_height)
-            pane.vertical_scroll = min(pane.vertical_scroll + 1, max_scroll)
+            self._chat_view.scroll_line_down()
 
         @kb.add("up", filter=is_browse)
         @kb.add("k", filter=is_browse)
@@ -307,7 +302,6 @@ class ChatApp:
             self._branch_editing = True
             self._branch_target_id = entry.node.parent_id
             self._mode = "input"
-            self._chat_view.set_browse_mode(False)
             event.app.layout.focus(self._input_area)
 
         # 新規チャット
@@ -316,9 +310,8 @@ class ChatApp:
             self._session.new_tree()
             self._branch_editing = False
             self._branch_target_id = None
-            self._chat_view.window.stick_to_bottom = True
+            self._chat_view.set_follow_bottom(True)
             self._mode = "input"
-            self._chat_view.set_browse_mode(False)
             self._refresh_chat_view()
             event.app.layout.focus(self._input_area)
 
@@ -354,9 +347,8 @@ class ChatApp:
                 self._session.load_tree(tree_id)
             self._branch_editing = False
             self._branch_target_id = None
-            self._chat_view.window.stick_to_bottom = True  # 末尾（最新メッセージ）を表示
+            self._chat_view.set_follow_bottom(True)  # 末尾（最新メッセージ）を表示
             self._mode = "input"
-            self._chat_view.set_browse_mode(False)
             self._refresh_chat_view()
             event.app.layout.focus(self._input_area)
 

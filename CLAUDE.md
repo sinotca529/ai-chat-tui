@@ -93,7 +93,7 @@ UI 層 → アプリケーション層 → ドメイン層
 
 **ブランチ構造**: `Node` は `parent_id` のみ持つ。子・兄弟は全ノードをスキャンして導出（Git のコミットと同じ設計）。ルートノード（`parent_id=None`）同士も兄弟として扱う。`current_id=None` は「ルート（最初のメッセージの直前）」を表し、`navigate_to(None)` で戻れる。ルートのユーザーメッセージをブランチ編集した場合はここから分岐する。そのため UI 層でブランチ編集中かどうかは `ChatApp._branch_editing` フラグで判定する（分岐先 `_branch_target_id` は正当な値として `None` を取り得るため、`None` チェックでは判定できない）。
 
-**モード**: `input` / `browse` / `tree_overlay` / `model_overlay` / `system_overlay` / `help_overlay` の 6 状態。`Condition` フィルタでキーバインドを分岐する。
+**モード**: `input` / `browse` / `tree_overlay` / `model_overlay` / `system_overlay` / `help_overlay` の 6 状態。`Condition` フィルタでキーバインドを分岐する。モードの単一情報源は `ChatApp._mode` で、`ChatView` は写しを持たずコンストラクタ注入の `is_browse` コールバックで参照する（browse 進入時のカーソル初期化のみ `init_browse_cursor()` を明示的に呼ぶ）。
 
 **キーバインド**:
 - `Ctrl+D` — 送信

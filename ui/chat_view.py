@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from prompt_toolkit.data_structures import Point
@@ -59,6 +60,10 @@ class AutoScrollPane(ScrollablePane):
     def __init__(self, content: DynamicContainer) -> None:
         super().__init__(content)
         self.stick_to_bottom = True
+        # 直近の描画時のジオメトリ。手動スクロールのクランプに使う。
+        # レイアウト構造（入力欄の高さ等）をここ以外が知る必要をなくす。
+        self._viewport_height = 0
+        self._content_height = 0
 
     def write_to_screen(
         self,
@@ -69,26 +74,41 @@ class AutoScrollPane(ScrollablePane):
         erase_bg: bool,
         z_index: int | None,
     ) -> None:
+        virtual_width = write_position.width - (1 if self.show_scrollbar() else 0)
+        virtual_height = max(
+            self.content.preferred_height(
+                virtual_width, self.max_available_height
+            ).preferred,
+            write_position.height,
+        )
+        self._viewport_height = write_position.height
+        self._content_height = virtual_height
         if self.stick_to_bottom:
-            virtual_width = write_position.width - (1 if self.show_scrollbar() else 0)
-            virtual_height = max(
-                self.content.preferred_height(
-                    virtual_width, self.max_available_height
-                ).preferred,
-                write_position.height,
-            )
             self.vertical_scroll = virtual_height - write_position.height
         super().write_to_screen(
             screen, mouse_handlers, write_position, parent_style, erase_bg, z_index
         )
 
+    def scroll_line_up(self) -> None:
+        self.vertical_scroll = max(0, self.vertical_scroll - 1)
+
+    def scroll_line_down(self) -> None:
+        max_scroll = max(0, self._content_height - self._viewport_height)
+        self.vertical_scroll = min(self.vertical_scroll + 1, max_scroll)
+
 
 class ChatView:
-    def __init__(self, session: ChatSession) -> None:
+    def __init__(
+        self,
+        session: ChatSession,
+        is_browse: Callable[[], bool] | None = None,
+    ) -> None:
         self._session = session
         self._entries: list[ThreadEntry] = []
         self._cursor_index: int = -1
-        self._browse_mode: bool = False
+        # browse 状態の単一情報源は ChatApp._mode。自前の写しは持たず、
+        # 描画のたびにコールバックで参照する（手動同期による乖離を防ぐ）。
+        self._is_browse = is_browse or (lambda: False)
         self._rows: list = []
         self._content_windows: list[Window] = []
 
@@ -141,9 +161,19 @@ class ChatView:
         if self._cursor_index >= len(entries):
             self._cursor_index = -1
 
-    def set_browse_mode(self, enabled: bool) -> None:
-        self._browse_mode = enabled
-        if enabled and self._cursor_index < 0:
+    def set_follow_bottom(self, follow: bool) -> None:
+        """下端オートスクロール追従の ON/OFF。"""
+        self.window.stick_to_bottom = follow
+
+    def scroll_line_up(self) -> None:
+        self.window.scroll_line_up()
+
+    def scroll_line_down(self) -> None:
+        self.window.scroll_line_down()
+
+    def init_browse_cursor(self) -> None:
+        """browse モード進入時、カーソル未設定なら末尾メッセージに置く"""
+        if self._cursor_index < 0:
             self._cursor_index = max(0, len(self._entries) - 1)
 
     def selected_entry(self) -> ThreadEntry | None:
@@ -190,7 +220,7 @@ class ChatView:
     # ── 行スタイル ────────────────────────────────────────────────────────────
 
     def _row_style(self, index: int, role: Role) -> str:
-        if self._browse_mode and index == self._cursor_index:
+        if self._is_browse() and index == self._cursor_index:
             return "bg:#1e4272"
         if role == Role.USER:
             return "bg:#1e1e1e"
@@ -216,7 +246,7 @@ class ChatView:
             ind_text = f"[{entry.sibling_index}/{entry.sibling_count}]"
             ind_ctrl = FormattedTextControl(
                 text=lambda e=entry, i=index: [(
-                    "fg:ansiwhite" if (self._browse_mode and i == self._cursor_index) else "fg:ansiyellow",
+                    "fg:ansiwhite" if (self._is_browse() and i == self._cursor_index) else "fg:ansiyellow",
                     f"[{e.sibling_index}/{e.sibling_count}]",
                 )],
             )
@@ -234,7 +264,7 @@ class ChatView:
 
     def _render_entry(self, entry: _RowEntry, index: int) -> StyleAndTextTuples:
         result: StyleAndTextTuples = []
-        is_selected = self._browse_mode and index == self._cursor_index
+        is_selected = self._is_browse() and index == self._cursor_index
 
         if entry.role == Role.USER:
             role_style = "bold fg:ansiwhite" if is_selected else "bold fg:ansibrightcyan"
