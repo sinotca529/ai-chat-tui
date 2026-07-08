@@ -54,12 +54,18 @@ class ApiHandler:
         self._registry = registry or ToolRegistry()
         # None=未確認 / False=サーバがツール非対応（400 検出後のフォールバック済み）
         self._tools_supported: bool | None = None
+        self._tool_message_log: list[dict] = []
 
     @property
     def model(self) -> str:
         return self._model
 
     def set_model(self, model_id: str) -> None:
+        if model_id != self._model:
+            # ツール対応可否はモデルごとの性質なので、別モデルへの切り替え時は
+            # フォールバック状態を破棄して次のリクエストで再確認する。
+            # 同一モデルの再選択では学習済みの状態を維持する（無駄な往復を避ける）。
+            self._tools_supported = None
         self._model = model_id
 
     async def generate_title(self, messages: list[dict]) -> str:
@@ -109,7 +115,7 @@ class ApiHandler:
         if self._tools_supported is False:
             # 過去にツール対応サーバで作られた履歴が混ざっていても送れるようにする
             current_messages = _strip_tool_messages(current_messages)
-        self._tool_message_log: list[dict] = []
+        self._tool_message_log = []
 
         for _ in range(_MAX_TOOL_ROUNDS):
             result = _RoundResult()
