@@ -280,6 +280,55 @@ async def test_fallback_retry_failure_propagates_and_keeps_tools_enabled():
     assert "tools" in completions.calls[2]
 
 
+async def test_set_model_resets_tools_fallback():
+    """別モデルへの切り替えでフォールバック状態を破棄し、tools を再送する。
+
+    ツール非対応モデルで一度フォールバックした後、ツール対応モデルに
+    切り替えてもツールが無効のままになる回帰を防ぐ。
+    """
+    rounds = [
+        [_text_chunk("a", finish="stop")],
+        [_text_chunk("b", finish="stop")],
+    ]
+    handler, _ = _make_handler([], registry=_echo_registry())
+    completions = _ToolRejectingCompletions(rounds)
+    handler._client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+    await _collect(handler, [{"role": "user", "content": "hi"}])  # フォールバック発動
+    assert "tools" not in completions.calls[1]
+
+    handler.set_model("tool-capable-model")
+    await _collect(handler, [{"role": "user", "content": "hi"}])
+    # リセットされたので tools 付きで再確認している（このスタブでは再び 400 →
+    # 再フォールバックするが、tools を送り直したこと自体が検証点）
+    assert "tools" in completions.calls[2]
+
+
+async def test_set_model_same_model_keeps_fallback_state():
+    """同一モデルの再選択ではフォールバック状態を維持する（往復を増やさない）"""
+    rounds = [
+        [_text_chunk("a", finish="stop")],
+        [_text_chunk("b", finish="stop")],
+    ]
+    handler, _ = _make_handler([], registry=_echo_registry())
+    completions = _ToolRejectingCompletions(rounds)
+    handler._client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+    await _collect(handler, [{"role": "user", "content": "hi"}])  # フォールバック発動
+    handler.set_model(handler.model)  # 同じモデルを再選択
+    await _collect(handler, [{"role": "user", "content": "hi"}])
+
+    # 3 リクエスト目は最初から tools なし（tools 付きの再確認をしていない）
+    assert len(completions.calls) == 3
+    assert "tools" not in completions.calls[2]
+
+
+def test_last_tool_messages_is_empty_before_first_stream():
+    """stream() 前に last_tool_messages を読んでも AttributeError にならない"""
+    handler, _ = _make_handler([])
+    assert handler.last_tool_messages == []
+
+
 async def test_generate_title_strips_brackets():
     response = SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content="「テスト会話」"))]
