@@ -97,6 +97,26 @@ class AutoScrollPane(ScrollablePane):
         self.vertical_scroll = min(self.vertical_scroll + 1, max_scroll)
 
 
+_CURSOR_LINE_STYLE = "bg:#1e4272"
+
+
+def _highlight_line(fragments: StyleAndTextTuples, target_line: int) -> StyleAndTextTuples:
+    """fragments 中の指定論理行（0 始まり）に背景色を付ける。"""
+    out: StyleAndTextTuples = []
+    line = 0
+    for style, text in fragments:
+        parts = text.split("\n")
+        for j, part in enumerate(parts):
+            if j > 0:
+                out.append((style, "\n"))
+                line += 1
+            if part:
+                out.append(
+                    (f"{style} {_CURSOR_LINE_STYLE}" if line == target_line else style, part)
+                )
+    return out
+
+
 class ChatView:
     def __init__(
         self,
@@ -105,7 +125,11 @@ class ChatView:
     ) -> None:
         self._session = session
         self._entries: list[ThreadEntry] = []
-        self._cursor_index: int = -1
+        # ブラウズカーソルは (メッセージ index, メッセージ内の論理行) の 2 次元。
+        # _cursor_msg = -1 は「選択なし」の番兵。折り返しは 1 論理行として扱う。
+        self._cursor_msg: int = -1
+        self._cursor_line: int = 0
+        self._line_counts: list[int] = []
         # browse 状態の単一情報源は ChatApp._mode。自前の写しは持たず、
         # 描画のたびにコールバックで参照する（手動同期による乖離を防ぐ）。
         self._is_browse = is_browse or (lambda: False)
@@ -154,12 +178,22 @@ class ChatView:
         self._entries = entries
         self._rows = []
         self._content_windows = []
+        self._line_counts = []
         for i, entry in enumerate(entries):
-            row, content_win = self._build_row(i, _RowEntry.from_thread_entry(entry))
+            row_entry = _RowEntry.from_thread_entry(entry)
+            row, content_win = self._build_row(i, row_entry)
             self._rows.append(row)
             self._content_windows.append(content_win)
-        if self._cursor_index >= len(entries):
-            self._cursor_index = -1
+            # 表示テキストは末尾に必ず "\n" が 1 つ付くので \n の数 = 論理行数
+            text = "".join(t for _, t in self._render_entry(row_entry, i))
+            self._line_counts.append(max(1, text.count("\n")))
+        if self._cursor_msg >= len(entries):
+            self._cursor_msg = -1
+            self._cursor_line = 0
+        elif self._cursor_msg >= 0:
+            self._cursor_line = min(
+                self._cursor_line, self._line_counts[self._cursor_msg] - 1
+            )
 
     def set_follow_bottom(self, follow: bool) -> None:
         """下端オートスクロール追従の ON/OFF。"""
@@ -172,24 +206,26 @@ class ChatView:
         self.window.scroll_line_down()
 
     def init_browse_cursor(self) -> None:
-        """browse モード進入時、カーソル未設定なら末尾メッセージに置く"""
-        if self._cursor_index < 0:
-            self._cursor_index = max(0, len(self._entries) - 1)
+        """browse モード進入時、カーソル未設定なら末尾メッセージの最終行に置く"""
+        if self._cursor_msg < 0 and self._entries:
+            self._cursor_msg = len(self._entries) - 1
+            self._cursor_line = self._line_counts[self._cursor_msg] - 1
 
     def selected_entry(self) -> ThreadEntry | None:
-        if 0 <= self._cursor_index < len(self._entries):
-            return self._entries[self._cursor_index]
+        if 0 <= self._cursor_msg < len(self._entries):
+            return self._entries[self._cursor_msg]
         return None
 
     def selected_content_window(self) -> Window | None:
-        if 0 <= self._cursor_index < len(self._content_windows):
-            return self._content_windows[self._cursor_index]
+        if 0 <= self._cursor_msg < len(self._content_windows):
+            return self._content_windows[self._cursor_msg]
         return None
 
     def set_cursor_to_node(self, node_id: int) -> None:
         for i, e in enumerate(self._entries):
             if e.node.id == node_id:
-                self._cursor_index = i
+                self._cursor_msg = i
+                self._cursor_line = 0
                 return
 
     def last_content_window(self) -> Window | None:
@@ -200,28 +236,34 @@ class ChatView:
         return self._stream_window
 
     def move_cursor_up(self) -> None:
+        """1 論理行上へ。メッセージ境界は自動で越え、先頭行で停止する。"""
         if not self._entries:
             return
-        if self._cursor_index < 0:
-            self._cursor_index = len(self._entries) - 1
-        else:
-            self._cursor_index = max(0, self._cursor_index - 1)
+        if self._cursor_msg < 0:
+            self.init_browse_cursor()
+            return
+        if self._cursor_line > 0:
+            self._cursor_line -= 1
+        elif self._cursor_msg > 0:
+            self._cursor_msg -= 1
+            self._cursor_line = self._line_counts[self._cursor_msg] - 1
 
     def move_cursor_down(self) -> None:
-        if not self._entries:
+        """1 論理行下へ。末尾行を超えると選択なし（番兵）に戻る。"""
+        if not self._entries or self._cursor_msg < 0:
             return
-        if self._cursor_index >= 0:
-            next_idx = self._cursor_index + 1
-            if next_idx >= len(self._entries):
-                self._cursor_index = -1
-            else:
-                self._cursor_index = next_idx
+        if self._cursor_line < self._line_counts[self._cursor_msg] - 1:
+            self._cursor_line += 1
+        elif self._cursor_msg < len(self._entries) - 1:
+            self._cursor_msg += 1
+            self._cursor_line = 0
+        else:
+            self._cursor_msg = -1
+            self._cursor_line = 0
 
     # ── 行スタイル ────────────────────────────────────────────────────────────
 
     def _row_style(self, index: int, role: Role) -> str:
-        if self._is_browse() and index == self._cursor_index:
-            return "bg:#1e4272"
         if role == Role.USER:
             return "bg:#1e1e1e"
         return ""
@@ -232,6 +274,12 @@ class ChatView:
         content_ctrl = FormattedTextControl(
             text=lambda e=entry, i=index: self._render_entry(e, i),
             focusable=True,
+            # カーソル行を ScrollablePane に伝え、行単位で可視に保たせる
+            get_cursor_position=lambda i=index: (
+                Point(x=0, y=self._cursor_line)
+                if (self._is_browse() and i == self._cursor_msg)
+                else None
+            ),
         )
         role = entry.role
         content_win = Window(
@@ -246,7 +294,7 @@ class ChatView:
             ind_text = f"[{entry.sibling_index}/{entry.sibling_count}]"
             ind_ctrl = FormattedTextControl(
                 text=lambda e=entry, i=index: [(
-                    "fg:ansiwhite" if (self._is_browse() and i == self._cursor_index) else "fg:ansiyellow",
+                    "fg:ansiwhite" if (self._is_browse() and i == self._cursor_msg) else "fg:ansiyellow",
                     f"[{e.sibling_index}/{e.sibling_count}]",
                 )],
             )
@@ -264,14 +312,13 @@ class ChatView:
 
     def _render_entry(self, entry: _RowEntry, index: int) -> StyleAndTextTuples:
         result: StyleAndTextTuples = []
-        is_selected = self._is_browse() and index == self._cursor_index
 
         if entry.role == Role.USER:
-            role_style = "bold fg:ansiwhite" if is_selected else "bold fg:ansibrightcyan"
+            role_style = "bold fg:ansibrightcyan"
             text_style = "fg:ansiwhite"
         else:
-            role_style = "bold fg:ansiwhite" if is_selected else "bold fg:ansibrightgreen"
-            text_style = "fg:ansiwhite" if is_selected else ""
+            role_style = "bold fg:ansibrightgreen"
+            text_style = ""
 
         result.append((role_style, ">" if entry.role == Role.USER else "*"))
         self._render_content(result, entry.content, text_style)
@@ -279,6 +326,10 @@ class ChatView:
             arg_str = ", ".join(f"{v}" for v in args.values())
             result.append(("fg:ansiyellow", f"\n  [{name}: {arg_str}]"))
         result.append(("", "\n"))
+
+        # 選択表示は行単位: カーソルのある論理行だけ背景色を付ける
+        if self._is_browse() and index == self._cursor_msg:
+            result = _highlight_line(result, self._cursor_line)
         return result
 
     def _get_pending_text(self) -> StyleAndTextTuples:

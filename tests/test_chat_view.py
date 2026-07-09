@@ -94,6 +94,53 @@ def test_cursor_starts_at_last_entry_and_wraps_to_sentinel():
     assert view.selected_entry().node.id == 2
 
 
+def test_line_cursor_moves_within_and_across_messages():
+    view = _view()
+    view.update([
+        _entry(0, Role.USER, "u1\nu2\nu3"),
+        _entry(1, Role.ASSISTANT, "a1\na2", parent_id=0),
+    ])
+    view.init_browse_cursor()  # 末尾メッセージの最終行
+    assert (view.selected_entry().node.id, view._cursor_line) == (1, 1)
+
+    view.move_cursor_up()
+    assert (view.selected_entry().node.id, view._cursor_line) == (1, 0)
+    view.move_cursor_up()  # メッセージ境界を越えて前メッセージの最終行へ
+    assert (view.selected_entry().node.id, view._cursor_line) == (0, 2)
+    view.move_cursor_up()
+    view.move_cursor_up()
+    assert (view.selected_entry().node.id, view._cursor_line) == (0, 0)
+    view.move_cursor_up()  # 先頭行で停止
+    assert (view.selected_entry().node.id, view._cursor_line) == (0, 0)
+
+    view.move_cursor_down()
+    assert (view.selected_entry().node.id, view._cursor_line) == (0, 1)
+
+
+def test_line_count_includes_tool_call_lines():
+    tool_messages = (
+        {"role": "assistant", "content": None,
+         "tool_calls": [{"id": "t1", "type": "function",
+                         "function": {"name": "web_search", "arguments": "{}"}}]},
+    )
+    view = _view()
+    view.update([
+        _entry(0, Role.ASSISTANT, "1行だけの本文", tool_messages=tool_messages),
+    ])
+    # 本文 1 行 + ツール呼び出し表示 1 行
+    assert view._line_counts == [2]
+
+
+def test_cursor_line_clamped_when_message_shrinks():
+    """h/l でのブランチ切替等で行数が減ったらカーソル行をクランプする"""
+    view = _view()
+    view.update([_entry(0, Role.USER, "1\n2\n3\n4")])
+    view.init_browse_cursor()
+    assert view._cursor_line == 3
+    view.update([_entry(0, Role.USER, "1\n2")])
+    assert (view.selected_entry().node.id, view._cursor_line) == (0, 1)
+
+
 def test_cursor_reset_when_entries_shrink():
     view = _view()
     view.update([_entry(0, Role.USER, "q"), _entry(1, Role.ASSISTANT, "a", parent_id=0)])
@@ -102,16 +149,39 @@ def test_cursor_reset_when_entries_shrink():
     assert view.selected_entry() is None  # 範囲外カーソルは破棄される
 
 
-def test_selection_style_follows_injected_browse_state():
-    """browse 状態は外部（ChatApp._mode）が単一情報源で、ChatView は写しを持たない"""
+def _styles_by_line(fragments):
+    """フラグメント列を論理行ごとの (style, text) リストに分解する"""
+    lines = [[]]
+    for style, text in fragments:
+        parts = text.split("\n")
+        for j, part in enumerate(parts):
+            if j > 0:
+                lines.append([])
+            if part:
+                lines[-1].append((style, part))
+    return lines
+
+
+def test_only_cursor_line_is_highlighted():
+    """選択表示は行単位: カーソル行だけに背景色が付く（browse 状態は外部が単一情報源）"""
     browse = {"on": False}
     view = ChatView(_fake_session(), is_browse=lambda: browse["on"])
-    view.update([_entry(0, Role.USER, "q")])
+    entries = [_entry(0, Role.USER, "1行目\n2行目\n3行目")]
+    view.update(entries)
     view.init_browse_cursor()
+    view.move_cursor_up()  # 2 行目（line=1）へ
 
-    assert view._row_style(0, Role.USER) == "bg:#1e1e1e"  # input 中は選択ハイライトなし
+    from ui.chat_view import _RowEntry
+    row = _RowEntry.from_thread_entry(entries[0])
+
+    # input モード中はハイライトなし
+    assert not any("bg:#1e4272" in s for s, _ in view._render_entry(row, 0))
+
     browse["on"] = True
-    assert view._row_style(0, Role.USER) == "bg:#1e4272"  # browse に入った瞬間から反映
+    lines = _styles_by_line(view._render_entry(row, 0))
+    assert all("bg:#1e4272" in s for s, t in lines[1])      # カーソル行
+    assert not any("bg:#1e4272" in s for s, t in lines[0])  # 他の行
+    assert not any("bg:#1e4272" in s for s, t in lines[2])
 
 
 def test_set_cursor_to_node():

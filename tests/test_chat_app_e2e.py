@@ -245,14 +245,18 @@ async def test_browse_manual_scroll_moves_one_line(store):
         await _wait_for(lambda: len(session.current_thread()) == 2)
         await _wait_for(lambda: app._chat_view.window.vertical_scroll > 0)
 
-        pipe.send_text(TAB)  # browse モード（追従 OFF）
+        pipe.send_text(TAB)  # browse モード（追従 OFF、カーソルは末尾行）
         await _wait_for(lambda: app._mode == "browse")
         start = await asyncio.wait_for(_settled_scroll(app), timeout=5)
+        assert start > 0  # コンテンツが溢れているので下端 > 0
 
-        pipe.send_text("\x05")  # Ctrl+E: 1 行下へ
-        await _wait_for(lambda: app._chat_view.window.vertical_scroll == start + 1)
         pipe.send_text("\x19")  # Ctrl+Y: 1 行上へ
+        await _wait_for(lambda: app._chat_view.window.vertical_scroll == start - 1)
+        pipe.send_text("\x05")  # Ctrl+E: 1 行下へ（下端でクランプ）
         await _wait_for(lambda: app._chat_view.window.vertical_scroll == start)
+        pipe.send_text("\x05")  # 下端よりさらに下へは行かない
+        await asyncio.sleep(0.2)
+        assert app._chat_view.window.vertical_scroll == start
 
         # 上端まで戻してさらに Ctrl+Y しても 0 で止まる
         for _ in range(start + 2):
