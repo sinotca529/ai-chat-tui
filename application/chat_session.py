@@ -5,6 +5,7 @@ from domain.role import Role
 from application.thread_entry import ThreadEntry
 from infrastructure.api_handler import ApiHandler, ToolIndicator
 from infrastructure.chat_tree_store import ChatTreeStore
+from infrastructure.memory_store import MemoryStore
 
 # コンテキスト圧縮の発動閾値（context_window に対する推定トークン数の割合）
 _COMPACT_TRIGGER_RATIO = 0.7
@@ -51,12 +52,14 @@ class ChatSession:
         store: ChatTreeStore,
         default_system_prompt: str = "",
         context_window: int | None = None,
+        memory_store: MemoryStore | None = None,
     ) -> None:
         self._tree = tree
         self._api = api
         self._store = store
         self._default_system_prompt = default_system_prompt
         self._context_window = context_window
+        self._memory_store = memory_store
         self._display_text: str = ""   # 表示用（ToolIndicator を含む）
         self._save_text: str = ""       # 保存用（ToolIndicator を除くテキストのみ）
         self._pending_user_msg: str | None = None
@@ -143,6 +146,11 @@ class ChatSession:
         system_parts = []
         if self.effective_system_prompt:
             system_parts.append(self.effective_system_prompt)
+        if self._memory_store:
+            memories = self._memory_store.list_all()
+            if memories:
+                lines = "\n".join(f"- {m['text']}" for m in memories)
+                system_parts.append(f"[ユーザーに関する記憶]\n{lines}")
         if summary:
             system_parts.append(f"[これまでの会話の要約]\n{summary}")
         if system_parts:

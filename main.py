@@ -8,6 +8,7 @@ from application.chat_session import ChatSession
 from infrastructure.api_handler import ApiHandler
 from infrastructure.chat_tree_store import ChatTreeStore
 from infrastructure.current_datetime import get_current_datetime
+from infrastructure.memory_store import MemoryStore, make_save_memory_tool
 from infrastructure.tool_registry import ToolRegistry
 from infrastructure.web_fetch import fetch_page
 from infrastructure.web_search import web_search
@@ -32,8 +33,13 @@ async def main() -> None:
 
     default_system_prompt = config.get("system", {}).get("prompt", "")
 
+    memory_store = MemoryStore(save_dir)
+
     registry = ToolRegistry()
-    registry.register(web_search, fetch_page, get_current_datetime)
+    registry.register(
+        web_search, fetch_page, get_current_datetime,
+        make_save_memory_tool(memory_store),
+    )
 
     store = ChatTreeStore(save_dir)
     api = ApiHandler(url=url, api_key=api_key, model=model, api_key_header=api_key_header, registry=registry)
@@ -44,6 +50,7 @@ async def main() -> None:
         store=store,
         default_system_prompt=default_system_prompt,
         context_window=context_window,
+        memory_store=memory_store,
     )
 
     app = ChatApp(session)

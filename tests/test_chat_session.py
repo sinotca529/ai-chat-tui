@@ -339,6 +339,40 @@ async def test_tool_result_truncation_does_not_touch_tree(store):
     assert first_asst.tool_messages[1]["content"] == big
 
 
+async def test_memories_injected_into_system_message(store, tmp_path, fake_api):
+    from infrastructure.memory_store import MemoryStore
+
+    memory_store = MemoryStore(str(tmp_path / "mem"))
+    memory_store.add("犬を飼っている")
+    memory_store.add("札幌在住")
+    session = ChatSession(
+        tree=ChatTree(), api=fake_api, store=store,
+        default_system_prompt="あなたは有能なアシスタントです。",
+        memory_store=memory_store,
+    )
+    await session.send_message("hi", _noop)
+
+    system = fake_api.sent_messages[0]
+    assert system["role"] == "system"
+    # システムプロンプト → 記憶 の順で合成される
+    assert system["content"].startswith("あなたは有能なアシスタントです。")
+    assert "[ユーザーに関する記憶]" in system["content"]
+    assert "- 犬を飼っている" in system["content"]
+    assert "- 札幌在住" in system["content"]
+
+
+async def test_empty_memory_adds_no_section(store, tmp_path, fake_api):
+    from infrastructure.memory_store import MemoryStore
+
+    session = ChatSession(
+        tree=ChatTree(), api=fake_api, store=store,
+        memory_store=MemoryStore(str(tmp_path / "mem")),
+    )
+    await session.send_message("hi", _noop)
+    # メモリが空なら system メッセージ自体を作らない（従来挙動を維持）
+    assert fake_api.sent_messages[0]["role"] == "user"
+
+
 async def test_generate_title_saves_tree(session, store):
     await session.send_message("hi", _noop)
     title = await session.generate_title()
