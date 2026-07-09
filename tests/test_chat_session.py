@@ -280,6 +280,65 @@ async def test_compaction_notice_shown_during_stream_but_not_saved(store):
     assert session.current_thread()[-1].node.content == "応答です"
 
 
+def _tool_messages_with_result(content: str) -> tuple:
+    return (
+        {"role": "assistant", "content": None,
+         "tool_calls": [{"id": "t1", "type": "function",
+                         "function": {"name": "fetch_page", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "t1", "content": content},
+    )
+
+
+async def test_old_tool_results_are_truncated_on_send(store):
+    """直近 4 ノードより古いノードの role:tool 本文は切り詰めて送る"""
+    big = "x" * 600
+    api = FakeApiHandler(chunks=("回答",), tool_messages=_tool_messages_with_result(big))
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    for i in range(3):
+        await session.send_message(f"q{i}", _noop)
+    await session.send_message("q3", _noop)  # 6 エントリ時点の送信内容を検査
+
+    tool_contents = [m["content"] for m in api.sent_messages if m.get("role") == "tool"]
+    assert len(tool_contents) == 3  # 各アシスタントノードに 1 件ずつ
+    # 古いノード（境界より前）は切り詰め + 省略表記
+    assert tool_contents[0].startswith("x" * 500)
+    assert "省略" in tool_contents[0]
+    assert len(tool_contents[0]) < len(big) + 50
+    # 直近ノードは原文のまま
+    assert tool_contents[1] == big
+    assert tool_contents[2] == big
+    # assistant の tool_calls メッセージは切り詰め対象外
+    assert any(m.get("tool_calls") for m in api.sent_messages)
+
+
+async def test_short_old_tool_results_are_sent_verbatim(store):
+    """500 文字以下の古いツール結果は切り詰めない"""
+    small = "短い結果"
+    api = FakeApiHandler(chunks=("回答",), tool_messages=_tool_messages_with_result(small))
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    for i in range(4):
+        await session.send_message(f"q{i}", _noop)
+
+    tool_contents = [m["content"] for m in api.sent_messages if m.get("role") == "tool"]
+    assert all(c == small for c in tool_contents)
+
+
+async def test_tool_result_truncation_does_not_touch_tree(store):
+    """切り詰めは送信時の変換のみで、ツリー（JSON）には原文が保存され続ける"""
+    big = "x" * 600
+    api = FakeApiHandler(chunks=("回答",), tool_messages=_tool_messages_with_result(big))
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    for i in range(4):
+        await session.send_message(f"q{i}", _noop)
+
+    loaded = store.load(session.tree_id)
+    first_asst = loaded.thread(loaded.current_id)[1]
+    assert first_asst.tool_messages[1]["content"] == big
+
+
 async def test_generate_title_saves_tree(session, store):
     await session.send_message("hi", _noop)
     title = await session.generate_title()

@@ -10,6 +10,27 @@ from infrastructure.chat_tree_store import ChatTreeStore
 _COMPACT_TRIGGER_RATIO = 0.7
 # 圧縮時に生のまま残す直近ノード数（2 往復分）
 _KEEP_RECENT_NODES = 4
+# ツール結果を原文のまま送る直近ノード数。それより古いノードの
+# role:tool メッセージ本文は下記の長さに切り詰める（Anthropic の
+# context editing / clear_tool_uses と同方式。ツール結果の情報は直後の
+# アシスタント応答に引き継がれているため、実用上の損失は小さい）
+_TOOL_RESULT_KEEP_RECENT = 4
+_OLD_TOOL_RESULT_MAX_CHARS = 500
+
+
+def _truncate_old_tool_result(msg: dict) -> dict:
+    """古いノードの role:tool メッセージ本文を切り詰める。それ以外は素通し。"""
+    if msg.get("role") != "tool":
+        return msg
+    content = msg.get("content") or ""
+    if len(content) <= _OLD_TOOL_RESULT_MAX_CHARS:
+        return msg
+    omitted = len(content) - _OLD_TOOL_RESULT_MAX_CHARS
+    return {
+        **msg,
+        "content": content[:_OLD_TOOL_RESULT_MAX_CHARS]
+        + f"\n...(古いツール結果のため以下 {omitted} 文字省略)",
+    }
 
 
 def _estimate_tokens(messages: list[dict]) -> int:
@@ -111,9 +132,13 @@ class ChatSession:
     def _build_thread_messages(self) -> list[dict]:
         summary, entries = self._summary_state()
         messages = []
-        for e in entries:
+        recent_boundary = len(entries) - _TOOL_RESULT_KEEP_RECENT
+        for i, e in enumerate(entries):
             if e.node.tool_messages:
-                messages.extend(list(e.node.tool_messages))
+                tool_msgs = list(e.node.tool_messages)
+                if i < recent_boundary:
+                    tool_msgs = [_truncate_old_tool_result(m) for m in tool_msgs]
+                messages.extend(tool_msgs)
             messages.append({"role": str(e.node.role), "content": e.node.content})
         system_parts = []
         if self.effective_system_prompt:
