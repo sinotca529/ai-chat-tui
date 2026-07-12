@@ -12,7 +12,7 @@ _BIN_OPS = {
     ast.Div: operator.truediv,
     ast.FloorDiv: operator.floordiv,
     ast.Mod: operator.mod,
-    ast.Pow: None,  # 巨大数ガードのため専用処理
+    # ast.Pow は巨大数ガードのため _eval_node 内で専用処理
 }
 _UNARY_OPS = {ast.UAdd: operator.pos, ast.USub: operator.neg}
 
@@ -51,31 +51,35 @@ def _safe_pow(base, exp):
 
 
 def _eval_node(node):
-    if isinstance(node, ast.Constant):
-        if isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
-            return node.value
-        raise ValueError(f"unsupported constant: {node.value!r}")
-    if isinstance(node, ast.BinOp) and type(node.op) in _BIN_OPS:
-        left, right = _eval_node(node.left), _eval_node(node.right)
-        if isinstance(node.op, ast.Pow):
-            return _safe_pow(left, right)
-        return _BIN_OPS[type(node.op)](left, right)
-    if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY_OPS:
-        return _UNARY_OPS[type(node.op)](_eval_node(node.operand))
-    if isinstance(node, ast.Call):
-        if (
-            isinstance(node.func, ast.Name)
-            and node.func.id in _FUNCTIONS
-            and not node.keywords
-        ):
-            args = [_eval_node(a) for a in node.args]
-            return _FUNCTIONS[node.func.id](*args)
-        raise ValueError("unsupported function call")
-    if isinstance(node, ast.Name):
-        if node.id in _CONSTANTS:
-            return _CONSTANTS[node.id]
-        raise ValueError(f"unknown name: {node.id}")
-    raise ValueError(f"unsupported syntax: {type(node).__name__}")
+    match node:
+        # bool は int のサブクラスなので、数値より先に弾く
+        case ast.Constant(value=bool() as value):
+            raise ValueError(f"unsupported constant: {value!r}")
+        case ast.Constant(value=(int() | float()) as value):
+            return value
+        case ast.Constant(value=value):
+            raise ValueError(f"unsupported constant: {value!r}")
+
+        case ast.BinOp(left=left, op=ast.Pow(), right=right):
+            return _safe_pow(_eval_node(left), _eval_node(right))
+        case ast.BinOp(left=left, op=op, right=right) if type(op) in _BIN_OPS:
+            return _BIN_OPS[type(op)](_eval_node(left), _eval_node(right))
+
+        case ast.UnaryOp(op=op, operand=operand) if type(op) in _UNARY_OPS:
+            return _UNARY_OPS[type(op)](_eval_node(operand))
+
+        case ast.Call(func=ast.Name(id=name), args=args, keywords=[]) if name in _FUNCTIONS:
+            return _FUNCTIONS[name](*[_eval_node(a) for a in args])
+        case ast.Call():
+            raise ValueError("unsupported function call")
+
+        case ast.Name(id=name) if name in _CONSTANTS:
+            return _CONSTANTS[name]
+        case ast.Name(id=name):
+            raise ValueError(f"unknown name: {name}")
+
+        case _:
+            raise ValueError(f"unsupported syntax: {type(node).__name__}")
 
 
 @tool(
