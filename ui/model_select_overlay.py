@@ -3,6 +3,8 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout import Window
 from prompt_toolkit.widgets import Frame
 
+from ui.overlay_size import list_height
+
 
 class ModelSelectOverlay:
     def __init__(self) -> None:
@@ -17,8 +19,14 @@ class ModelSelectOverlay:
             focusable=True,
             get_cursor_position=self._get_cursor_pos,
         )
-        inner = Window(content=self.control, width=60, height=10)
-        self.window = Frame(body=inner, title="モデルを選択 (Enter: 決定 / Ctrl+O: 閉じる)")
+        self._list_window = Window(
+            content=self.control,
+            width=60,
+            height=lambda: list_height(len(self._models)),
+        )
+        self.window = Frame(
+            body=self._list_window, title="モデルを選択 (Enter: 決定 / Ctrl+O: 閉じる)"
+        )
 
     def start_loading(self, current_model: str) -> None:
         self._loading = True
