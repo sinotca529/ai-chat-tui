@@ -276,6 +276,20 @@ class ChatApp:
             if win:
                 event.app.layout.focus(win)
 
+        @kb.add("g", "g", filter=is_browse)
+        def _cursor_top(event):
+            self._chat_view.move_cursor_to_top()
+            win = self._chat_view.selected_content_window()
+            if win:
+                event.app.layout.focus(win)
+
+        @kb.add("G", filter=is_browse)
+        def _cursor_bottom(event):
+            self._chat_view.move_cursor_to_bottom()
+            win = self._chat_view.selected_content_window()
+            if win:
+                event.app.layout.focus(win)
+
         @kb.add("left", filter=is_browse)
         @kb.add("h", filter=is_browse)
         def _sibling_prev(event):

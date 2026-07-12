@@ -365,6 +365,29 @@ async def test_external_editor_failure_keeps_input(store, tmp_path, monkeypatch)
         assert app._input_area.text == "元の下書き"
 
 
+async def test_gg_and_G_jump_to_top_and_bottom(store):
+    api = FakeApiHandler(chunks=("応答",))
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text("q1")
+        pipe.send_text(CTRL_D)
+        await _wait_for(lambda: len(session.current_thread()) == 2)
+        pipe.send_text("q2")
+        pipe.send_text(CTRL_D)
+        await _wait_for(lambda: len(session.current_thread()) == 4)
+
+        pipe.send_text(TAB)
+        await _wait_for(lambda: app._mode == "browse")
+        pipe.send_text("gg")
+        await _wait_for(lambda: app._chat_view._cursor_msg == 0)
+        assert app._chat_view.selected_entry().node.content == "q1"
+
+        pipe.send_text("G")
+        await _wait_for(lambda: app._chat_view._cursor_msg == 3)
+        assert app._chat_view.selected_entry().node.content == "応答"
+
+
 async def test_wrap_math_matches_renderer(store):
     """自前の折り返し計算が prompt_toolkit の実描画と一致すること（オラクル検証）。
 

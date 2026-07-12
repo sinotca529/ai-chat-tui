@@ -267,12 +267,24 @@ class ChatView:
 
     def init_browse_cursor(self) -> None:
         """browse モード進入時、カーソル未設定なら末尾メッセージの最終視覚行に置く"""
-        if self._cursor_msg < 0 and self._entries:
-            self._cursor_msg = len(self._entries) - 1
-            self._cursor_line = self._line_counts[self._cursor_msg] - 1
-            self._cursor_seg = (
-                len(self._segments(self._cursor_msg, self._cursor_line)) - 1
-            )
+        if self._cursor_msg < 0:
+            self.move_cursor_to_bottom()
+
+    def move_cursor_to_top(self) -> None:
+        """先頭メッセージの先頭視覚行へ（vim の gg 相当）"""
+        if not self._entries:
+            return
+        self._cursor_msg = 0
+        self._cursor_line = 0
+        self._cursor_seg = 0
+
+    def move_cursor_to_bottom(self) -> None:
+        """末尾メッセージの最終視覚行へ（vim の G 相当）"""
+        if not self._entries:
+            return
+        self._cursor_msg = len(self._entries) - 1
+        self._cursor_line = self._line_counts[self._cursor_msg] - 1
+        self._cursor_seg = len(self._segments(self._cursor_msg, self._cursor_line)) - 1
 
     def selected_entry(self) -> ThreadEntry | None:
         if 0 <= self._cursor_msg < len(self._entries):

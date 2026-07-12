@@ -180,6 +180,29 @@ def test_line_cursor_moves_within_and_across_messages():
     assert (view.selected_entry().node.id, view._cursor_line) == (0, 1)
 
 
+def test_cursor_to_top_and_bottom(monkeypatch):
+    """gg/G 相当: 先頭は (0,0,0)、末尾は最終メッセージの最終視覚行"""
+    view = _view()
+    view.update([
+        _entry(0, Role.USER, "u1\nu2"),
+        _entry(1, Role.ASSISTANT, "a" * 200, parent_id=0),
+    ])
+    monkeypatch.setattr(view, "_content_width", lambda i: 80)
+
+    view.move_cursor_to_top()
+    assert (view._cursor_msg, view._cursor_line, view._cursor_seg) == (0, 0, 0)
+
+    view.move_cursor_to_bottom()
+    # "* " + 200 文字 = 202 文字 → 3 視覚行の最終セグメント
+    assert (view._cursor_msg, view._cursor_line, view._cursor_seg) == (1, 0, 2)
+
+    # 番兵状態（選択なし）からも直接ジャンプできる
+    view.move_cursor_down()  # 末尾を超えて番兵へ
+    assert view.selected_entry() is None
+    view.move_cursor_to_top()
+    assert (view._cursor_msg, view._cursor_line, view._cursor_seg) == (0, 0, 0)
+
+
 def test_line_count_includes_tool_call_lines():
     tool_messages = (
         {"role": "assistant", "content": None,
