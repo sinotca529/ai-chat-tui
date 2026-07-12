@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from application.chat_session import ChatSession
 from infrastructure.api_handler import ApiHandler
 from infrastructure.chat_tree_store import ChatTreeStore
+from infrastructure.calculator import calculate
 from infrastructure.current_datetime import get_current_datetime
 from infrastructure.memory_store import MemoryStore, make_save_memory_tool
 from infrastructure.tool_registry import ToolRegistry
@@ -37,7 +38,7 @@ async def main() -> None:
 
     registry = ToolRegistry()
     registry.register(
-        web_search, fetch_page, get_current_datetime,
+        web_search, fetch_page, get_current_datetime, calculate,
         make_save_memory_tool(memory_store),
     )
 
