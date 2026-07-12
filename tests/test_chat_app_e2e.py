@@ -441,6 +441,24 @@ async def test_ghost_text_hidden_once_typing_starts(store):
         assert not app._is_input_empty()
 
 
+async def test_tree_overlay_height_grows_with_items(store):
+    """ツリー選択オーバーレイの一覧が項目数に応じて広がる（従来は 10 行固定）"""
+    from domain.chat_tree import ChatTree as _Tree
+    for i in range(30):
+        store.save(_Tree(tree_id=f"tree-{i:02d}", title=f"ツリー{i}"))
+
+    api = FakeApiHandler()
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text("\x14")  # Ctrl+T
+        await _wait_for(lambda: app._mode == "tree_overlay")
+        inner = app._tree_overlay._list_window
+        await _wait_for(lambda: inner.render_info is not None)
+        # 30 ツリー + [新規作成] = 31 行（DummyOutput 40 行の余白内に収まる）
+        await _wait_for(lambda: inner.render_info.window_height == 31)
+
+
 async def test_new_chat_switches_tree(store):
     api = FakeApiHandler()
     session = ChatSession(tree=ChatTree(), api=api, store=store)

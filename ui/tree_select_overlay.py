@@ -3,6 +3,8 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout import Window
 from prompt_toolkit.widgets import Frame
 
+from ui.overlay_size import list_height
+
 
 class TreeSelectOverlay:
     def __init__(self) -> None:
@@ -15,8 +17,14 @@ class TreeSelectOverlay:
             focusable=True,
             get_cursor_position=self._get_cursor_pos,
         )
-        inner = Window(content=self.control, width=60, height=10)
-        self.window = Frame(body=inner, title="ツリーを選択 (Enter: 決定 / Ctrl+T: 閉じる)")
+        self._list_window = Window(
+            content=self.control,
+            width=60,
+            height=lambda: list_height(len(self._trees)),
+        )
+        self.window = Frame(
+            body=self._list_window, title="ツリーを選択 (Enter: 決定 / Ctrl+T: 閉じる)"
+        )
 
     def load(self, trees: list[tuple[str, str]]) -> None:
         self._trees = [("", "[新規作成]")] + trees

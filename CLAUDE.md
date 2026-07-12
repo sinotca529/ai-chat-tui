@@ -87,6 +87,7 @@ UI 層 → アプリケーション層 → ドメイン層
 - `highlight.py` — コードブロックのパース (`iter_content`) と Pygments によるハイライト (`highlight_code`)。
 - `tree_select_overlay.py` — `TreeSelectOverlay`: 保存済みツリーの選択・削除 UI。
 - `model_select_overlay.py` — `ModelSelectOverlay`: モデル一覧の選択 UI（非同期ロード）。
+- `overlay_size.py` — `list_height()`: 一覧オーバーレイの高さ計算。項目数ぶん表示し、最小 5 行・端末高 − 6 行でクランプ（描画のたびに評価されるため端末リサイズに追従）。ツリー選択・モデル選択の両方が使う。
 - `system_prompt_overlay.py` — `SystemPromptOverlay`: TextArea によるシステムプロンプト編集 UI。
 - `help_overlay.py` — `HelpOverlay`: キーバインド一覧の静的表示。
 
