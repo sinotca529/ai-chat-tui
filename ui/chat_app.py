@@ -276,6 +276,22 @@ class ChatApp:
             if win:
                 event.app.layout.focus(win)
 
+        @kb.add("{", filter=is_browse)
+        @kb.add("[", "[", filter=is_browse)
+        def _prev_message(event):
+            self._chat_view.move_cursor_to_prev_message()
+            win = self._chat_view.selected_content_window()
+            if win:
+                event.app.layout.focus(win)
+
+        @kb.add("}", filter=is_browse)
+        @kb.add("]", "]", filter=is_browse)
+        def _next_message(event):
+            self._chat_view.move_cursor_to_next_message()
+            win = self._chat_view.selected_content_window()
+            if win:
+                event.app.layout.focus(win)
+
         @kb.add("g", "g", filter=is_browse)
         def _cursor_top(event):
             self._chat_view.move_cursor_to_top()

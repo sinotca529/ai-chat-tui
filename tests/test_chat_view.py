@@ -203,6 +203,35 @@ def test_cursor_to_top_and_bottom(monkeypatch):
     assert (view._cursor_msg, view._cursor_line, view._cursor_seg) == (0, 0, 0)
 
 
+def test_prev_next_message_jump():
+    """{ / } 相当: 途中なら現在メッセージ先頭へ、先頭なら前のメッセージ先頭へ"""
+    view = _view()
+    view.update([
+        _entry(0, Role.USER, "u1\nu2"),
+        _entry(1, Role.ASSISTANT, "a1\na2\na3", parent_id=0),
+    ])
+    view.init_browse_cursor()  # (1, 2, 0) 末尾メッセージの最終行
+
+    view.move_cursor_to_prev_message()  # 途中 → まず現在メッセージの先頭
+    assert (view._cursor_msg, view._cursor_line, view._cursor_seg) == (1, 0, 0)
+    view.move_cursor_to_prev_message()  # 先頭 → 前のメッセージの先頭
+    assert (view._cursor_msg, view._cursor_line) == (0, 0)
+    view.move_cursor_to_prev_message()  # 最初のメッセージでは留まる
+    assert (view._cursor_msg, view._cursor_line) == (0, 0)
+
+    view.move_cursor_to_next_message()
+    assert (view._cursor_msg, view._cursor_line) == (1, 0)
+    view.move_cursor_to_next_message()  # 末尾メッセージでは留まる（番兵に落ちない）
+    assert (view._cursor_msg, view._cursor_line) == (1, 0)
+
+    # 番兵からの { は末尾メッセージの先頭へ
+    view.move_cursor_to_bottom()
+    view.move_cursor_down()
+    assert view.selected_entry() is None
+    view.move_cursor_to_prev_message()
+    assert (view._cursor_msg, view._cursor_line) == (1, 0)
+
+
 def test_line_count_includes_tool_call_lines():
     tool_messages = (
         {"role": "assistant", "content": None,

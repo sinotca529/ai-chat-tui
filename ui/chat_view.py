@@ -270,6 +270,26 @@ class ChatView:
         if self._cursor_msg < 0:
             self.move_cursor_to_bottom()
 
+    def move_cursor_to_prev_message(self) -> None:
+        """メッセージ先頭へ。既に先頭なら前のメッセージの先頭へ（vim の { 相当）"""
+        if not self._entries:
+            return
+        if self._cursor_msg < 0:
+            self._cursor_msg = len(self._entries) - 1  # 番兵からは末尾メッセージの先頭へ
+        elif self._cursor_line == 0 and self._cursor_seg == 0 and self._cursor_msg > 0:
+            self._cursor_msg -= 1
+        self._cursor_line = 0
+        self._cursor_seg = 0
+
+    def move_cursor_to_next_message(self) -> None:
+        """次のメッセージの先頭へ（vim の } 相当）。末尾メッセージでは留まる"""
+        if not self._entries or self._cursor_msg < 0:
+            return
+        if self._cursor_msg < len(self._entries) - 1:
+            self._cursor_msg += 1
+            self._cursor_line = 0
+            self._cursor_seg = 0
+
     def move_cursor_to_top(self) -> None:
         """先頭メッセージの先頭視覚行へ（vim の gg 相当）"""
         if not self._entries:

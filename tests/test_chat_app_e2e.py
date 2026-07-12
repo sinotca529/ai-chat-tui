@@ -387,6 +387,15 @@ async def test_gg_and_G_jump_to_top_and_bottom(store):
         await _wait_for(lambda: app._chat_view._cursor_msg == 3)
         assert app._chat_view.selected_entry().node.content == "応答"
 
+        pipe.send_text("{")  # 前のメッセージ（先頭）へ
+        await _wait_for(lambda: app._chat_view._cursor_msg == 2)
+        pipe.send_text("[[")  # エイリアスでも同じ
+        await _wait_for(lambda: app._chat_view._cursor_msg == 1)
+        pipe.send_text("}")
+        await _wait_for(lambda: app._chat_view._cursor_msg == 2)
+        pipe.send_text("]]")
+        await _wait_for(lambda: app._chat_view._cursor_msg == 3)
+
 
 async def test_wrap_math_matches_renderer(store):
     """自前の折り返し計算が prompt_toolkit の実描画と一致すること（オラクル検証）。
