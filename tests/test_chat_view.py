@@ -94,6 +94,69 @@ def test_cursor_starts_at_last_entry_and_wraps_to_sentinel():
     assert view.selected_entry().node.id == 2
 
 
+def test_wrap_starts_ascii():
+    from ui.chat_view import _wrap_starts
+    # 先頭行 10 セル、継続行 8 セル
+    assert _wrap_starts("a" * 25, 10, 8) == [0, 10, 18]
+
+
+def test_wrap_starts_cjk_double_width():
+    from ui.chat_view import _wrap_starts
+    # 全角は 2 セル: 先頭行に 5 文字（10 セル）
+    assert _wrap_starts("あ" * 8, 10, 8) == [0, 5]
+
+
+def test_wrap_starts_cjk_never_splits_across_boundary():
+    from ui.chat_view import _wrap_starts
+    # 全角文字はセル境界をまたがず丸ごと次の視覚行へ送られる
+    assert _wrap_starts("aaaああ", 5, 5) == [0, 4]
+
+
+def test_wrap_starts_short_empty_and_narrow():
+    from ui.chat_view import _wrap_starts
+    assert _wrap_starts("short", 80, 78) == [0]
+    assert _wrap_starts("", 80, 78) == [0]
+    assert _wrap_starts("whatever", 2, 0) == [0]  # 幅が狭すぎる場合は折り返さない
+
+
+def test_visual_line_movement_within_wrapped_line(monkeypatch):
+    view = _view()
+    view.update([_entry(0, Role.USER, "a" * 200)])
+    monkeypatch.setattr(view, "_content_width", lambda i: 80)
+    view.init_browse_cursor()
+    # 行テキストは "> " + 200 文字 = 202 文字 → 80 + 78 + 44 の 3 視覚行
+    assert (view._cursor_line, view._cursor_seg) == (0, 2)
+
+    view.move_cursor_up()
+    assert view._cursor_seg == 1
+    view.move_cursor_up()
+    assert view._cursor_seg == 0
+    view.move_cursor_up()  # 先頭視覚行で停止
+    assert (view._cursor_line, view._cursor_seg) == (0, 0)
+
+    view.move_cursor_down()
+    assert view._cursor_seg == 1
+    view.move_cursor_down()
+    view.move_cursor_down()  # 最終視覚行を超えると番兵へ
+    assert view.selected_entry() is None
+
+
+def test_only_cursor_visual_row_is_highlighted(monkeypatch):
+    view = ChatView(_fake_session(), is_browse=lambda: True)
+    entries = [_entry(0, Role.USER, "a" * 200)]
+    view.update(entries)
+    monkeypatch.setattr(view, "_content_width", lambda i: 80)
+    view.init_browse_cursor()
+    view.move_cursor_up()  # 中央のセグメント（文字 [80, 158) の 78 文字）へ
+
+    from ui.chat_view import _RowEntry
+    frags = view._render_entry(_RowEntry.from_thread_entry(entries[0]), 0)
+    highlighted = "".join(t for s, t in frags if "bg:#1e4272" in s)
+    plain = "".join(t for s, t in frags if "bg:#1e4272" not in s)
+    assert len(highlighted) == 78
+    assert len(plain) == 202 - 78 + 1  # 残りの文字 + 末尾の改行
+
+
 def test_line_cursor_moves_within_and_across_messages():
     view = _view()
     view.update([
@@ -115,6 +178,58 @@ def test_line_cursor_moves_within_and_across_messages():
 
     view.move_cursor_down()
     assert (view.selected_entry().node.id, view._cursor_line) == (0, 1)
+
+
+def test_cursor_to_top_and_bottom(monkeypatch):
+    """gg/G 相当: 先頭は (0,0,0)、末尾は最終メッセージの最終視覚行"""
+    view = _view()
+    view.update([
+        _entry(0, Role.USER, "u1\nu2"),
+        _entry(1, Role.ASSISTANT, "a" * 200, parent_id=0),
+    ])
+    monkeypatch.setattr(view, "_content_width", lambda i: 80)
+
+    view.move_cursor_to_top()
+    assert (view._cursor_msg, view._cursor_line, view._cursor_seg) == (0, 0, 0)
+
+    view.move_cursor_to_bottom()
+    # "* " + 200 文字 = 202 文字 → 3 視覚行の最終セグメント
+    assert (view._cursor_msg, view._cursor_line, view._cursor_seg) == (1, 0, 2)
+
+    # 番兵状態（選択なし）からも直接ジャンプできる
+    view.move_cursor_down()  # 末尾を超えて番兵へ
+    assert view.selected_entry() is None
+    view.move_cursor_to_top()
+    assert (view._cursor_msg, view._cursor_line, view._cursor_seg) == (0, 0, 0)
+
+
+def test_prev_next_message_jump():
+    """{ / } 相当: 途中なら現在メッセージ先頭へ、先頭なら前のメッセージ先頭へ"""
+    view = _view()
+    view.update([
+        _entry(0, Role.USER, "u1\nu2"),
+        _entry(1, Role.ASSISTANT, "a1\na2\na3", parent_id=0),
+    ])
+    view.init_browse_cursor()  # (1, 2, 0) 末尾メッセージの最終行
+
+    view.move_cursor_to_prev_message()  # 途中 → まず現在メッセージの先頭
+    assert (view._cursor_msg, view._cursor_line, view._cursor_seg) == (1, 0, 0)
+    view.move_cursor_to_prev_message()  # 先頭 → 前のメッセージの先頭
+    assert (view._cursor_msg, view._cursor_line) == (0, 0)
+    view.move_cursor_to_prev_message()  # 最初のメッセージでは留まる
+    assert (view._cursor_msg, view._cursor_line) == (0, 0)
+
+    view.move_cursor_to_next_message()
+    assert (view._cursor_msg, view._cursor_line) == (1, 0)
+    view.move_cursor_to_next_message()  # 末尾メッセージでは留まる（番兵に落ちない）
+    assert (view._cursor_msg, view._cursor_line) == (1, 0)
+
+    # 番兵からの { は末尾メッセージの先頭へ
+    view.move_cursor_to_bottom()
+    view.move_cursor_down()
+    assert view.selected_entry() is None
+    view.move_cursor_to_prev_message()
+    assert (view._cursor_msg, view._cursor_line) == (1, 0)
 
 
 def test_line_count_includes_tool_call_lines():
