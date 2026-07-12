@@ -365,6 +365,39 @@ async def test_external_editor_failure_keeps_input(store, tmp_path, monkeypatch)
         assert app._input_area.text == "元の下書き"
 
 
+async def test_wrap_math_matches_renderer(store):
+    """自前の折り返し計算が prompt_toolkit の実描画と一致すること（オラクル検証）。
+
+    ChatView._segments は pt と同じ get_cwidth・同じ貪欲法の「写し」なので、
+    pt 側のアルゴリズム変更でサイレントにずれるリスクがある。CJK・半角・
+    絵文字・Ambiguous 文字の混在コンテンツで「自前計算の視覚行数の合計 +
+    末尾空行 = 実際に描画された Window の高さ」を検証し、ずれたらここで
+    検出する。
+    """
+    mixed = "\n".join([
+        "日本語の長い行です。" * 20,          # 全角のみ
+        "mixed 半角と全角の交互テキスト " * 15,  # 混在
+        "emoji 🙂🎉👍 and ambiguous ①②③ " * 10,
+        "a" * 150,                           # 半角のみ
+    ])
+    api = FakeApiHandler(chunks=(mixed,))
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text("長文ください")
+        pipe.send_text(CTRL_D)
+        await _wait_for(lambda: len(session.current_thread()) == 2)
+        view = app._chat_view
+        await _wait_for(lambda: view._content_windows[1].render_info is not None)
+
+        ours = sum(
+            len(view._segments(1, line)) for line in range(view._line_counts[1])
+        )
+        rendered = view._content_windows[1].render_info.window_height
+        assert ours > view._line_counts[1]  # 折り返しが実際に発生している
+        assert ours + 1 == rendered  # +1 は表示テキスト末尾の "\n" による空行
+
+
 async def test_ghost_text_hidden_once_typing_starts(store):
     api = FakeApiHandler()
     session = ChatSession(tree=ChatTree(), api=api, store=store)

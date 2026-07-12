@@ -94,6 +94,69 @@ def test_cursor_starts_at_last_entry_and_wraps_to_sentinel():
     assert view.selected_entry().node.id == 2
 
 
+def test_wrap_starts_ascii():
+    from ui.chat_view import _wrap_starts
+    # 先頭行 10 セル、継続行 8 セル
+    assert _wrap_starts("a" * 25, 10, 8) == [0, 10, 18]
+
+
+def test_wrap_starts_cjk_double_width():
+    from ui.chat_view import _wrap_starts
+    # 全角は 2 セル: 先頭行に 5 文字（10 セル）
+    assert _wrap_starts("あ" * 8, 10, 8) == [0, 5]
+
+
+def test_wrap_starts_cjk_never_splits_across_boundary():
+    from ui.chat_view import _wrap_starts
+    # 全角文字はセル境界をまたがず丸ごと次の視覚行へ送られる
+    assert _wrap_starts("aaaああ", 5, 5) == [0, 4]
+
+
+def test_wrap_starts_short_empty_and_narrow():
+    from ui.chat_view import _wrap_starts
+    assert _wrap_starts("short", 80, 78) == [0]
+    assert _wrap_starts("", 80, 78) == [0]
+    assert _wrap_starts("whatever", 2, 0) == [0]  # 幅が狭すぎる場合は折り返さない
+
+
+def test_visual_line_movement_within_wrapped_line(monkeypatch):
+    view = _view()
+    view.update([_entry(0, Role.USER, "a" * 200)])
+    monkeypatch.setattr(view, "_content_width", lambda i: 80)
+    view.init_browse_cursor()
+    # 行テキストは "> " + 200 文字 = 202 文字 → 80 + 78 + 44 の 3 視覚行
+    assert (view._cursor_line, view._cursor_seg) == (0, 2)
+
+    view.move_cursor_up()
+    assert view._cursor_seg == 1
+    view.move_cursor_up()
+    assert view._cursor_seg == 0
+    view.move_cursor_up()  # 先頭視覚行で停止
+    assert (view._cursor_line, view._cursor_seg) == (0, 0)
+
+    view.move_cursor_down()
+    assert view._cursor_seg == 1
+    view.move_cursor_down()
+    view.move_cursor_down()  # 最終視覚行を超えると番兵へ
+    assert view.selected_entry() is None
+
+
+def test_only_cursor_visual_row_is_highlighted(monkeypatch):
+    view = ChatView(_fake_session(), is_browse=lambda: True)
+    entries = [_entry(0, Role.USER, "a" * 200)]
+    view.update(entries)
+    monkeypatch.setattr(view, "_content_width", lambda i: 80)
+    view.init_browse_cursor()
+    view.move_cursor_up()  # 中央のセグメント（文字 [80, 158) の 78 文字）へ
+
+    from ui.chat_view import _RowEntry
+    frags = view._render_entry(_RowEntry.from_thread_entry(entries[0]), 0)
+    highlighted = "".join(t for s, t in frags if "bg:#1e4272" in s)
+    plain = "".join(t for s, t in frags if "bg:#1e4272" not in s)
+    assert len(highlighted) == 78
+    assert len(plain) == 202 - 78 + 1  # 残りの文字 + 末尾の改行
+
+
 def test_line_cursor_moves_within_and_across_messages():
     view = _view()
     view.update([

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.formatted_text import StyleAndTextTuples
+from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout import Window, VSplit, HSplit, ScrollablePane
 from prompt_toolkit.layout.containers import DynamicContainer
@@ -98,22 +99,69 @@ class AutoScrollPane(ScrollablePane):
 
 
 _CURSOR_LINE_STYLE = "bg:#1e4272"
+_FALLBACK_WIDTH = 80  # 初回描画前に幅が未確定なときの折り返し計算用
+_WRAP_PREFIX_WIDTH = 2  # 折り返し継続行の get_line_prefix "  " の幅
 
 
-def _highlight_line(fragments: StyleAndTextTuples, target_line: int) -> StyleAndTextTuples:
-    """fragments 中の指定論理行（0 始まり）に背景色を付ける。"""
+def _wrap_starts(line: str, width: int, cont_width: int) -> list[int]:
+    """論理行が折り返される各視覚行の開始文字オフセットを返す。
+
+    prompt_toolkit の Window と同様に文字の表示幅（全角 = 2 セル）で
+    折り返し位置を計算する。先頭行は width、継続行は cont_width
+    （行プレフィックス分狭い）で折り返す。
+    """
+    if width <= _WRAP_PREFIX_WIDTH or not line:
+        return [0]
+    starts = [0]
+    avail = width
+    col = 0
+    for i, ch in enumerate(line):
+        w = get_cwidth(ch)
+        if col + w > avail:
+            starts.append(i)
+            col = w
+            avail = max(1, cont_width)
+        else:
+            col += w
+    return starts
+
+
+def _highlight_line(
+    fragments: StyleAndTextTuples,
+    target_line: int,
+    start_col: int = 0,
+    end_col: int | None = None,
+) -> StyleAndTextTuples:
+    """fragments 中の指定論理行の [start_col, end_col) 文字範囲に背景色を付ける。
+
+    end_col が None なら行末まで。視覚行（折り返しセグメント）単位の
+    カーソル表示に使う。
+    """
     out: StyleAndTextTuples = []
     line = 0
+    col = 0
     for style, text in fragments:
         parts = text.split("\n")
         for j, part in enumerate(parts):
             if j > 0:
                 out.append((style, "\n"))
                 line += 1
-            if part:
-                out.append(
-                    (f"{style} {_CURSOR_LINE_STYLE}" if line == target_line else style, part)
-                )
+                col = 0
+            if not part:
+                continue
+            if line != target_line:
+                out.append((style, part))
+                col += len(part)
+                continue
+            s = max(0, min(len(part), start_col - col))
+            e = len(part) if end_col is None else max(0, min(len(part), end_col - col))
+            if s > 0:
+                out.append((style, part[:s]))
+            if e > s:
+                out.append((f"{style} {_CURSOR_LINE_STYLE}", part[s:e]))
+            if e < len(part):
+                out.append((style, part[e:]))
+            col += len(part)
     return out
 
 
@@ -125,11 +173,14 @@ class ChatView:
     ) -> None:
         self._session = session
         self._entries: list[ThreadEntry] = []
-        # ブラウズカーソルは (メッセージ index, メッセージ内の論理行) の 2 次元。
-        # _cursor_msg = -1 は「選択なし」の番兵。折り返しは 1 論理行として扱う。
+        # ブラウズカーソルは (メッセージ index, 論理行, 折り返しセグメント) の
+        # 3 次元。移動は視覚行単位（vim の gj/gk 相当）。
+        # _cursor_msg = -1 は「選択なし」の番兵。
         self._cursor_msg: int = -1
         self._cursor_line: int = 0
+        self._cursor_seg: int = 0
         self._line_counts: list[int] = []
+        self._line_texts: list[list[str]] = []  # メッセージごとの論理行テキスト
         # browse 状態の単一情報源は ChatApp._mode。自前の写しは持たず、
         # 描画のたびにコールバックで参照する（手動同期による乖離を防ぐ）。
         self._is_browse = is_browse or (lambda: False)
@@ -179,20 +230,29 @@ class ChatView:
         self._rows = []
         self._content_windows = []
         self._line_counts = []
+        self._line_texts = []
         for i, entry in enumerate(entries):
             row_entry = _RowEntry.from_thread_entry(entry)
             row, content_win = self._build_row(i, row_entry)
             self._rows.append(row)
             self._content_windows.append(content_win)
-            # 表示テキストは末尾に必ず "\n" が 1 つ付くので \n の数 = 論理行数
+            # 表示テキストは末尾に必ず "\n" が 1 つ付く → 最後の空要素を除いた
+            # split 結果が論理行のリスト
             text = "".join(t for _, t in self._render_entry(row_entry, i))
-            self._line_counts.append(max(1, text.count("\n")))
+            lines = text.split("\n")[:-1] or [""]
+            self._line_texts.append(lines)
+            self._line_counts.append(len(lines))
         if self._cursor_msg >= len(entries):
             self._cursor_msg = -1
             self._cursor_line = 0
+            self._cursor_seg = 0
         elif self._cursor_msg >= 0:
             self._cursor_line = min(
                 self._cursor_line, self._line_counts[self._cursor_msg] - 1
+            )
+            self._cursor_seg = min(
+                self._cursor_seg,
+                len(self._segments(self._cursor_msg, self._cursor_line)) - 1,
             )
 
     def set_follow_bottom(self, follow: bool) -> None:
@@ -206,10 +266,13 @@ class ChatView:
         self.window.scroll_line_down()
 
     def init_browse_cursor(self) -> None:
-        """browse モード進入時、カーソル未設定なら末尾メッセージの最終行に置く"""
+        """browse モード進入時、カーソル未設定なら末尾メッセージの最終視覚行に置く"""
         if self._cursor_msg < 0 and self._entries:
             self._cursor_msg = len(self._entries) - 1
             self._cursor_line = self._line_counts[self._cursor_msg] - 1
+            self._cursor_seg = (
+                len(self._segments(self._cursor_msg, self._cursor_line)) - 1
+            )
 
     def selected_entry(self) -> ThreadEntry | None:
         if 0 <= self._cursor_msg < len(self._entries):
@@ -226,6 +289,7 @@ class ChatView:
             if e.node.id == node_id:
                 self._cursor_msg = i
                 self._cursor_line = 0
+                self._cursor_seg = 0
                 return
 
     def last_content_window(self) -> Window | None:
@@ -236,30 +300,67 @@ class ChatView:
         return self._stream_window
 
     def move_cursor_up(self) -> None:
-        """1 論理行上へ。メッセージ境界は自動で越え、先頭行で停止する。"""
+        """1 視覚行上へ（gj/gk 相当）。メッセージ境界は自動で越え、先頭で停止する。"""
         if not self._entries:
             return
         if self._cursor_msg < 0:
             self.init_browse_cursor()
             return
-        if self._cursor_line > 0:
+        self._cursor_seg = self._clamped_seg(
+            self._segments(self._cursor_msg, self._cursor_line)
+        )
+        if self._cursor_seg > 0:
+            self._cursor_seg -= 1
+        elif self._cursor_line > 0:
             self._cursor_line -= 1
+            self._cursor_seg = len(self._segments(self._cursor_msg, self._cursor_line)) - 1
         elif self._cursor_msg > 0:
             self._cursor_msg -= 1
             self._cursor_line = self._line_counts[self._cursor_msg] - 1
+            self._cursor_seg = len(self._segments(self._cursor_msg, self._cursor_line)) - 1
 
     def move_cursor_down(self) -> None:
-        """1 論理行下へ。末尾行を超えると選択なし（番兵）に戻る。"""
+        """1 視覚行下へ。末尾を超えると選択なし（番兵）に戻る。"""
         if not self._entries or self._cursor_msg < 0:
             return
-        if self._cursor_line < self._line_counts[self._cursor_msg] - 1:
+        segs = self._segments(self._cursor_msg, self._cursor_line)
+        self._cursor_seg = self._clamped_seg(segs)
+        if self._cursor_seg < len(segs) - 1:
+            self._cursor_seg += 1
+        elif self._cursor_line < self._line_counts[self._cursor_msg] - 1:
             self._cursor_line += 1
+            self._cursor_seg = 0
         elif self._cursor_msg < len(self._entries) - 1:
             self._cursor_msg += 1
             self._cursor_line = 0
+            self._cursor_seg = 0
         else:
             self._cursor_msg = -1
             self._cursor_line = 0
+            self._cursor_seg = 0
+
+    # ── 折り返し計算 ──────────────────────────────────────────────────────────
+
+    def _content_width(self, index: int) -> int:
+        """メッセージ Window の直近描画時の幅。未描画なら妥当なデフォルト。"""
+        info = self._content_windows[index].render_info
+        return info.window_width if info else _FALLBACK_WIDTH
+
+    def _segments(self, msg: int, line: int) -> list[int]:
+        """指定論理行の各視覚行の開始文字オフセット。"""
+        width = self._content_width(msg)
+        return _wrap_starts(
+            self._line_texts[msg][line], width, width - _WRAP_PREFIX_WIDTH
+        )
+
+    def _clamped_seg(self, segs: list[int]) -> int:
+        """端末リサイズ等でセグメント数が減った場合に備えたクランプ。"""
+        return min(self._cursor_seg, len(segs) - 1)
+
+    def _cursor_point(self) -> Point:
+        """カーソルの視覚行を表す (セグメント開始文字, 論理行) の content 座標。"""
+        segs = self._segments(self._cursor_msg, self._cursor_line)
+        return Point(x=segs[self._clamped_seg(segs)], y=self._cursor_line)
 
     # ── 行スタイル ────────────────────────────────────────────────────────────
 
@@ -274,11 +375,9 @@ class ChatView:
         content_ctrl = FormattedTextControl(
             text=lambda e=entry, i=index: self._render_entry(e, i),
             focusable=True,
-            # カーソル行を ScrollablePane に伝え、行単位で可視に保たせる
+            # カーソルの視覚行を ScrollablePane に伝え、行単位で可視に保たせる
             get_cursor_position=lambda i=index: (
-                Point(x=0, y=self._cursor_line)
-                if (self._is_browse() and i == self._cursor_msg)
-                else None
+                self._cursor_point() if (self._is_browse() and i == self._cursor_msg) else None
             ),
         )
         role = entry.role
@@ -327,9 +426,19 @@ class ChatView:
             result.append(("fg:ansiyellow", f"\n  [{name}: {arg_str}]"))
         result.append(("", "\n"))
 
-        # 選択表示は行単位: カーソルのある論理行だけ背景色を付ける
-        if self._is_browse() and index == self._cursor_msg:
-            result = _highlight_line(result, self._cursor_line)
+        # 選択表示は視覚行単位: カーソルのあるセグメントの文字範囲だけ背景色を付ける。
+        # update() 中の行数計測呼び出しでは _line_texts が未構築なのでスキップする
+        # （ハイライトは style のみの変更でテキストには影響しない）。
+        if (
+            self._is_browse()
+            and index == self._cursor_msg
+            and index < len(self._line_texts)
+        ):
+            segs = self._segments(index, self._cursor_line)
+            seg = self._clamped_seg(segs)
+            start = segs[seg]
+            end = segs[seg + 1] if seg + 1 < len(segs) else None
+            result = _highlight_line(result, self._cursor_line, start, end)
         return result
 
     def _get_pending_text(self) -> StyleAndTextTuples:
