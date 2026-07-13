@@ -5,11 +5,14 @@ import pyperclip
 
 from prompt_toolkit import Application
 from prompt_toolkit.output.color_depth import ColorDepth
-from prompt_toolkit.filters import Condition
+from prompt_toolkit.completion import Completer, PathCompleter
+from prompt_toolkit.document import Document
+from prompt_toolkit.filters import Condition, has_completions
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout, HSplit, FloatContainer, Float, Window
 from prompt_toolkit.layout.containers import ConditionalContainer
 from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.styles import merge_styles
 from prompt_toolkit.styles.pygments import style_from_pygments_cls
 from prompt_toolkit.widgets import TextArea
@@ -24,6 +27,24 @@ from ui.system_prompt_overlay import SystemPromptOverlay
 from ui.help_overlay import HelpOverlay
 
 _Mode = Literal["input", "browse", "tree_overlay", "model_overlay", "system_overlay", "help_overlay"]
+
+
+class _AttachPathCompleter(Completer):
+    """入力中のトークンが @ で始まるときだけパス補完を出す（添付ファイル用）。"""
+
+    def __init__(self) -> None:
+        self._paths = PathCompleter(expanduser=True)
+
+    def get_completions(self, document, complete_event):
+        before = document.text_before_cursor
+        if not before or before[-1].isspace():
+            return
+        token = before.split()[-1]
+        if not token.startswith("@"):
+            return
+        path_part = token[1:]
+        sub_doc = Document(path_part, len(path_part))
+        yield from self._paths.get_completions(sub_doc, complete_event)
 
 
 class ChatApp:
@@ -64,6 +85,8 @@ class ChatApp:
             scrollbar=False,
             wrap_lines=True,
             get_line_prefix=self._input_prefix,
+            completer=_AttachPathCompleter(),
+            complete_while_typing=True,
         )
         # 外部エディタ編集時の一時ファイル拡張子（エディタ側でハイライトが効く）
         self._input_area.buffer.tempfile_suffix = ".md"
@@ -126,6 +149,12 @@ class ChatApp:
                     ),
                     xcursor=True,
                     ycursor=True,
+                ),
+                # @パス の補完候補ポップアップ
+                Float(
+                    xcursor=True,
+                    ycursor=True,
+                    content=CompletionsMenu(max_height=8, scroll_offset=1),
                 ),
             ],
         )
@@ -225,7 +254,7 @@ class ChatApp:
             self._session.prepare_streaming(msg)
             self._stream_task = asyncio.ensure_future(self._do_stream(msg))
 
-        @kb.add("tab", filter=is_input)
+        @kb.add("tab", filter=is_input & ~has_completions)
         def _to_browse(event):
             self._mode = "browse"
             # 過去メッセージを読むモードに入るので下端追従を止める
@@ -450,6 +479,15 @@ class ChatApp:
                 self._session.set_model(model_id)
             self._mode = "input"
             event.app.layout.focus(self._input_area)
+
+        # 補完メニュー表示中のキー（後に登録したバインドが優先されるため最後に置く）
+        @kb.add("tab", filter=is_input & has_completions)
+        def _complete_next(event):
+            event.current_buffer.complete_next()
+
+        @kb.add("escape", filter=is_input & has_completions)
+        def _cancel_completion(event):
+            event.current_buffer.cancel_completion()
 
         return kb
 

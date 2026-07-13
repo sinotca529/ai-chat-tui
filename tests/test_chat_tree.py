@@ -83,7 +83,10 @@ def test_dict_round_trip_preserves_everything():
         {"role": "assistant", "content": None, "tool_calls": []},
         {"role": "tool", "tool_call_id": "t1", "content": "result"},
     )
-    node_id = tree.insert(3, Role.ASSISTANT, "with tools", tool_messages=tool_msgs)
+    atts = ({"path": "/tmp/spec.md", "content": "中身"},)
+    node_id = tree.insert(
+        3, Role.ASSISTANT, "with tools", tool_messages=tool_msgs, attachments=atts
+    )
     tree.set_current(node_id)
 
     restored = ChatTree.from_dict(tree.to_dict())
@@ -98,6 +101,7 @@ def test_dict_round_trip_preserves_everything():
         "q1", "ans1", "q2", "ans2", "with tools",
     ]
     assert restored.thread(node_id)[-1].tool_messages == tool_msgs
+    assert restored.thread(node_id)[-1].attachments == atts
     assert restored.thread(node_id)[-1].role is Role.ASSISTANT
 
 
@@ -117,3 +121,4 @@ def test_from_dict_accepts_legacy_nodes_without_tool_messages():
     assert tree.summary == ""
     assert tree.summary_upto_id is None
     assert tree.thread(1)[0].tool_messages == ()
+    assert tree.thread(1)[0].attachments == ()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -27,6 +28,7 @@ class _RowEntry:
     sibling_index: int
     sibling_count: int
     tool_calls: tuple = ()  # (name, args_dict) のタプル列
+    attachments: tuple = ()  # (ファイル名, 文字数) のタプル列
 
     @classmethod
     def from_thread_entry(cls, e: ThreadEntry) -> "_RowEntry":
@@ -46,6 +48,10 @@ class _RowEntry:
             sibling_index=e.sibling_index,
             sibling_count=e.sibling_count,
             tool_calls=tuple(tool_calls),
+            attachments=tuple(
+                (os.path.basename(a["path"]), len(a["content"]))
+                for a in e.node.attachments
+            ),
         )
 
 
@@ -456,6 +462,8 @@ class ChatView:
         for name, args in entry.tool_calls:
             arg_str = ", ".join(f"{v}" for v in args.values())
             result.append(("fg:ansiyellow", f"\n  [{name}: {arg_str}]"))
+        for name, chars in entry.attachments:
+            result.append(("fg:ansiyellow", f"\n  [添付: {name} ({chars}文字)]"))
         result.append(("", "\n"))
 
         # 選択表示は視覚行単位: カーソルのあるセグメントの文字範囲だけ背景色を付ける。
