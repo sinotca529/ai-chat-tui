@@ -83,6 +83,30 @@ def test_long_content_truncated(tmp_path, monkeypatch):
     assert "50 文字省略" in result[0]["content"]
 
 
+def test_missing_windows_style_path_raises():
+    """引用なしの C:\\ 形式もパス風とみなし、タイポを黙って無視しない"""
+    with pytest.raises(ValueError, match="見つかりません"):
+        load_attachments("@C:\\Users\\noone\\no_such.md を読んで")
+    with pytest.raises(ValueError, match="見つかりません"):
+        load_attachments("@D:/data/no_such.md")
+    with pytest.raises(ValueError, match="見つかりません"):
+        load_attachments("@\\\\server\\share\\no_such.md")  # UNC
+
+
+def test_msys_path_falls_back_to_windows_form(tmp_path, monkeypatch):
+    """Git Bash の /c/... 形式は、存在しない場合 c:/... に読み替えて再試行する。
+
+    Linux では「c:」という名前のディレクトリを作ることで、相対パス
+    c:/memo.md としての解決を再現できる（Windows ではドライブ C: になる）。
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "c:").mkdir()
+    (tmp_path / "c:" / "memo.md").write_text("MSYS経由", encoding="utf-8")
+
+    result = load_attachments("@/c/memo.md を読んで")
+    assert result[0]["content"] == "MSYS経由"
+
+
 def test_duplicate_paths_deduped(spec_file):
     result = load_attachments(f"@{spec_file} と @{spec_file}")
     assert len(result) == 1

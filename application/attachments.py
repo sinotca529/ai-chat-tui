@@ -10,6 +10,36 @@ MAX_FILE_BYTES = 5 * 1024 * 1024
 _TOKEN_RE = re.compile(r'@(?:"([^"]+)"|\'([^\']+)\'|((?:\\ |\S)+))')
 # これらで始まるトークンは「パスのつもり」とみなし、存在しなければエラーにする
 _PATHISH_PREFIXES = ("/", "~", "./", "../")
+# Windows のドライブレター形式 (C:\ / C:/) と MSYS (Git Bash) 形式 (/c/...)
+_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+_MSYS_RE = re.compile(r"^/([A-Za-z])(/.*)?$")
+
+
+def _is_pathish(raw: str, quoted: bool) -> bool:
+    return (
+        quoted
+        or raw.startswith(_PATHISH_PREFIXES)
+        or bool(_DRIVE_RE.match(raw))
+        or raw.startswith("\\\\")  # UNC パス
+    )
+
+
+def _resolve_path(raw: str) -> str:
+    """~ を展開し、必要なら MSYS 形式を Windows 形式に読み替えて返す。
+
+    Git Bash (Windows Terminal) では /c/Users/... 形式が入力され得るが、
+    Windows 版 Python はこれを解決できないため、存在しない場合に限り
+    C:/Users/... へ読み替えて再試行する。
+    """
+    path = os.path.expanduser(raw)
+    if os.path.exists(path):
+        return path
+    m = _MSYS_RE.match(raw)
+    if m:
+        alt = f"{m.group(1)}:{m.group(2) or '/'}"
+        if os.path.exists(alt):
+            return alt
+    return path
 
 
 def load_attachments(text: str) -> tuple[dict, ...]:
@@ -27,10 +57,9 @@ def load_attachments(text: str) -> tuple[dict, ...]:
     for m in _TOKEN_RE.finditer(text):
         quoted = m.group(1) or m.group(2)
         raw = quoted if quoted is not None else m.group(3).replace("\\ ", " ")
-        pathish = quoted is not None or raw.startswith(_PATHISH_PREFIXES)
-        path = os.path.expanduser(raw)
+        path = _resolve_path(raw)
         if not os.path.exists(path):
-            if pathish:
+            if _is_pathish(raw, quoted is not None):
                 raise ValueError(f"添付ファイルが見つかりません: {raw}")
             continue
         if os.path.isdir(path):
