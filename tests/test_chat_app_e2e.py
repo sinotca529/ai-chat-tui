@@ -45,11 +45,20 @@ async def _running_app(session: ChatSession):
                 await asyncio.wait_for(run_task, timeout=5)
 
 
-async def test_send_message_end_to_end(store):
-    api = FakeApiHandler(chunks=("Hi", " there"))
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
+@asynccontextmanager
+async def _start_app(store, **api_kwargs):
+    """FakeApiHandler + ChatSession + 起動済みアプリの一体型ヘルパー。
 
+    api_kwargs は FakeApiHandler にそのまま渡す（chunks= 等）。
+    """
+    api = FakeApiHandler(**api_kwargs)
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
     async with _running_app(session) as (app, pipe):
+        yield app, pipe, session, api
+
+
+async def test_send_message_end_to_end(store):
+    async with _start_app(store, chunks=("Hi", " there")) as (app, pipe, session, api):
         pipe.send_text("こんにちは")
         pipe.send_text(CTRL_D)
         await _wait_for(lambda: len(session.current_thread()) == 2)
@@ -62,10 +71,7 @@ async def test_send_message_end_to_end(store):
 
 
 async def test_empty_input_is_not_sent(store):
-    api = FakeApiHandler()
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store) as (app, pipe, session, api):
         pipe.send_text("   ")
         pipe.send_text(CTRL_D)
         await asyncio.sleep(0.2)
@@ -74,10 +80,7 @@ async def test_empty_input_is_not_sent(store):
 
 
 async def test_cancel_streaming_restores_input(store):
-    api = FakeApiHandler(chunks=("部分応答",), block_forever=True)
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store, chunks=("部分応答",), block_forever=True) as (app, pipe, session, api):
         pipe.send_text("キャンセルされる質問")
         pipe.send_text(CTRL_D)
         await _wait_for(lambda: app._streaming)
@@ -90,10 +93,7 @@ async def test_cancel_streaming_restores_input(store):
 
 
 async def test_stream_error_shows_message_and_restores_input(store):
-    api = FakeApiHandler(chunks=("途中", RuntimeError("connection lost")))
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store, chunks=("途中", RuntimeError("connection lost"))) as (app, pipe, session, api):
         pipe.send_text("失敗する質問")
         pipe.send_text(CTRL_D)
         await _wait_for(lambda: "connection lost" in session.streaming_text)
@@ -110,10 +110,7 @@ async def test_branch_edit_creates_sibling(store):
     CLAUDE.md の不変条件（分岐点へ navigate 後に _refresh_chat_view して
     からストリーミング開始）の回帰テスト。
     """
-    api = FakeApiHandler(chunks=("応答",))
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store, chunks=("応答",)) as (app, pipe, session, api):
         pipe.send_text("q1")
         pipe.send_text(CTRL_D)
         await _wait_for(lambda: len(session.current_thread()) == 2)
@@ -141,10 +138,7 @@ async def test_branch_edit_creates_sibling(store):
 
 async def test_branch_edit_of_root_message_creates_sibling(store):
     """ルートのユーザーメッセージ (parent_id=None) のブランチ編集も分岐すること。"""
-    api = FakeApiHandler(chunks=("応答",))
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store, chunks=("応答",)) as (app, pipe, session, api):
         pipe.send_text("root質問")
         pipe.send_text(CTRL_D)
         await _wait_for(lambda: len(session.current_thread()) == 2)
@@ -167,10 +161,7 @@ async def test_branch_edit_of_root_message_creates_sibling(store):
 
 
 async def test_help_overlay_toggle(store):
-    api = FakeApiHandler()
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store) as (app, pipe, session, api):
         pipe.send_text(F1)
         await _wait_for(lambda: app._mode == "help_overlay")
         pipe.send_text(F1)
@@ -179,10 +170,7 @@ async def test_help_overlay_toggle(store):
 
 async def test_question_mark_is_typed_into_input_not_bound_to_help(store):
     """? キーはヘルプに割り当てず、メッセージ本文にそのまま入力できること"""
-    api = FakeApiHandler()
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store) as (app, pipe, session, api):
         pipe.send_text("これは質問ですか?")
         await _wait_for(lambda: app._input_area.text == "これは質問ですか?")
         assert app._mode == "input"
@@ -194,10 +182,7 @@ async def test_autoscroll_follows_streaming_response(store):
     DummyOutput は 40 行 × 80 桁。チャットペインは約 31 行なので
     60 行の応答は必ず溢れる。
     """
-    api = FakeApiHandler(chunks=("行\n" * 60,), block_forever=True)
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store, chunks=("行\n" * 60,), block_forever=True) as (app, pipe, session, api):
         pipe.send_text("長い応答をください")
         pipe.send_text(CTRL_D)
         await _wait_for(lambda: app._streaming)
@@ -208,10 +193,7 @@ async def test_autoscroll_follows_streaming_response(store):
 
 
 async def test_autoscroll_after_response_completes(store):
-    api = FakeApiHandler(chunks=("行\n" * 60,))
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store, chunks=("行\n" * 60,)) as (app, pipe, session, api):
         pipe.send_text("長い応答をください")
         pipe.send_text(CTRL_D)
         await _wait_for(lambda: len(session.current_thread()) == 2)
@@ -236,10 +218,7 @@ async def test_browse_manual_scroll_moves_one_line(store):
     注: browse 進入時は選択メッセージの先頭が見える位置までスクロールが
     調整される（既存挙動）ため、絶対位置ではなく相対移動を検証する。
     """
-    api = FakeApiHandler(chunks=("行\n" * 60,))
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store, chunks=("行\n" * 60,)) as (app, pipe, session, api):
         pipe.send_text("長い応答をください")
         pipe.send_text(CTRL_D)
         await _wait_for(lambda: len(session.current_thread()) == 2)
@@ -269,15 +248,12 @@ async def test_browse_manual_scroll_moves_one_line(store):
 
 async def test_scroll_keeps_cursor_visible_and_view_does_not_jump_back(store):
     """C-y/C-e でカーソルがビュー内に追従し、直後の j/k でビューが巻き戻らないこと"""
-    api = FakeApiHandler(chunks=("行\n" * 60,))
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
     def cursor_visible(app) -> bool:
         view, pane = app._chat_view, app._chat_view.window
         row = view._cursor_global_row()
         return pane.vertical_scroll <= row < pane.vertical_scroll + pane._viewport_height
 
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store, chunks=("行\n" * 60,)) as (app, pipe, session, api):
         pipe.send_text("長い応答をください")
         pipe.send_text(CTRL_D)
         await _wait_for(lambda: len(session.current_thread()) == 2)
@@ -299,10 +275,7 @@ async def test_scroll_keeps_cursor_visible_and_view_does_not_jump_back(store):
 
 
 async def test_browse_mode_disables_autoscroll_until_next_send(store):
-    api = FakeApiHandler()
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store) as (app, pipe, session, api):
         assert app._chat_view.window.stick_to_bottom  # 初期状態は追従 ON
 
         pipe.send_text(TAB)  # browse モードへ → 過去を読むので追従 OFF
@@ -325,10 +298,7 @@ async def test_enter_does_not_copy_indent(store):
     非ブラケットペーストでは改行が 1 つずつ Enter として処理されるため、
     copy_margin が有効だと貼り付けたコードのインデントが階段状に重なる。
     """
-    api = FakeApiHandler()
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store) as (app, pipe, session, api):
         pipe.send_text("    indented line")
         pipe.send_text("\r")  # Enter
         pipe.send_text("next line")
@@ -345,11 +315,8 @@ async def test_non_bracketed_paste_preserves_indentation(store):
     コードでその経路を再現する（copy_margin が有効だと前行のインデントが
     各行にコピーされ、階段状に崩れて失敗する）。
     """
-    api = FakeApiHandler()
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
     code = "def f(x):\n    if x:\n        return 1\n    return 0"
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store) as (app, pipe, session, api):
         # 端末が改行を CR として送る非ブラケットペーストのキー列
         pipe.send_text(code.replace("\n", "\r"))
         await _wait_for(lambda: app._input_area.text == code)
@@ -364,10 +331,7 @@ async def test_external_editor_roundtrip(store, tmp_path, monkeypatch):
     editor.chmod(0o755)
     monkeypatch.setenv("VISUAL", str(editor))
 
-    api = FakeApiHandler()
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store) as (app, pipe, session, api):
         pipe.send_text("下書き")
         await _wait_for(lambda: app._input_area.text == "下書き")
         pipe.send_text("\x18\x05")  # Ctrl+X Ctrl+E
@@ -385,10 +349,7 @@ async def test_external_editor_failure_keeps_input(store, tmp_path, monkeypatch)
     editor.chmod(0o755)
     monkeypatch.setenv("VISUAL", str(editor))
 
-    api = FakeApiHandler()
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store) as (app, pipe, session, api):
         pipe.send_text("元の下書き")
         await _wait_for(lambda: app._input_area.text == "元の下書き")
         pipe.send_text("\x18\x05")  # Ctrl+X Ctrl+E
@@ -397,10 +358,7 @@ async def test_external_editor_failure_keeps_input(store, tmp_path, monkeypatch)
 
 
 async def test_gg_and_G_jump_to_top_and_bottom(store):
-    api = FakeApiHandler(chunks=("応答",))
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store, chunks=("応答",)) as (app, pipe, session, api):
         pipe.send_text("q1")
         pipe.send_text(CTRL_D)
         await _wait_for(lambda: len(session.current_thread()) == 2)
@@ -443,10 +401,7 @@ async def test_wrap_math_matches_renderer(store):
         "emoji 🙂🎉👍 and ambiguous ①②③ " * 10,
         "a" * 150,                           # 半角のみ
     ])
-    api = FakeApiHandler(chunks=(mixed,))
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store, chunks=(mixed,)) as (app, pipe, session, api):
         pipe.send_text("長文ください")
         pipe.send_text(CTRL_D)
         await _wait_for(lambda: len(session.current_thread()) == 2)
@@ -464,10 +419,7 @@ async def test_wrap_math_matches_renderer(store):
 async def test_attachment_send_end_to_end(store, tmp_path):
     f = tmp_path / "notes.md"
     f.write_text("メモの中身", encoding="utf-8")
-    api = FakeApiHandler(chunks=("読みました",))
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store, chunks=("読みました",)) as (app, pipe, session, api):
         pipe.send_text(f"@{f} を要約して")
         pipe.send_text(CTRL_D)
         await _wait_for(lambda: len(session.current_thread()) == 2)
@@ -478,10 +430,7 @@ async def test_attachment_send_end_to_end(store, tmp_path):
 
 
 async def test_missing_attachment_shows_error_and_restores_input(store):
-    api = FakeApiHandler()
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store) as (app, pipe, session, api):
         pipe.send_text("@/no/such/file.md を読んで")
         pipe.send_text(CTRL_D)
         await _wait_for(lambda: "見つかりません" in session.streaming_text)
@@ -495,10 +444,7 @@ async def test_at_token_completion_and_tab_coexistence(store, tmp_path, monkeypa
     (tmp_path / "attach_target.md").write_text("x", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    api = FakeApiHandler()
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store) as (app, pipe, session, api):
         pipe.send_text("@attach_t")
         # complete_while_typing で補完候補が付くのを待つ
         await _wait_for(lambda: app._input_area.buffer.complete_state is not None)
@@ -513,10 +459,7 @@ async def test_at_token_completion_and_tab_coexistence(store, tmp_path, monkeypa
 
 
 async def test_ghost_text_hidden_once_typing_starts(store):
-    api = FakeApiHandler()
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store) as (app, pipe, session, api):
         assert app._is_input_empty()
         pipe.send_text("a")
         await _wait_for(lambda: app._input_area.text == "a")
@@ -529,10 +472,7 @@ async def test_tree_overlay_height_grows_with_items(store):
     for i in range(30):
         store.save(_Tree(tree_id=f"tree-{i:02d}", title=f"ツリー{i}"))
 
-    api = FakeApiHandler()
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store) as (app, pipe, session, api):
         pipe.send_text("\x14")  # Ctrl+T
         await _wait_for(lambda: app._mode == "tree_overlay")
         inner = app._tree_overlay._list_window
@@ -542,10 +482,7 @@ async def test_tree_overlay_height_grows_with_items(store):
 
 
 async def test_new_chat_switches_tree(store):
-    api = FakeApiHandler()
-    session = ChatSession(tree=ChatTree(), api=api, store=store)
-
-    async with _running_app(session) as (app, pipe):
+    async with _start_app(store) as (app, pipe, session, api):
         pipe.send_text("q1")
         pipe.send_text(CTRL_D)
         await _wait_for(lambda: len(session.current_thread()) == 2)
