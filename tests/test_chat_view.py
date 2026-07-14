@@ -218,6 +218,28 @@ def test_cursor_to_top_and_bottom(monkeypatch):
     assert (view._cursor_msg, view._cursor_line, view._cursor_seg) == (0, 0, 0)
 
 
+def test_scroll_drags_cursor_into_view(monkeypatch):
+    """ビューポート外に出たカーソルは、収まる位置まで引きずられる（vim の C-e/C-y）"""
+    view = _view()
+    view.update([
+        _entry(0, Role.USER, "u1\nu2"),                       # rows 0-2（空行含む）
+        _entry(1, Role.ASSISTANT, "a1\na2\na3", parent_id=0),  # rows 3-6
+    ])
+    monkeypatch.setattr(view, "_content_width", lambda i: 80)
+    pane = view.window
+    pane._viewport_height = 3
+    pane._content_height = 7  # 3 + 4 視覚行
+    view.init_browse_cursor()  # (msg1, line2) = row 5
+
+    pane.vertical_scroll = 0  # ビューは rows 0..2、scroll_offsets.bottom=1 で実質 0..1
+    view._drag_cursor_into_view()
+    assert (view._cursor_msg, view._cursor_line) == (0, 1)  # row 1
+
+    pane.vertical_scroll = 4  # 下端。ビューは rows 4..6、offsets.top=1 で実質 5..6
+    view._drag_cursor_into_view()
+    assert (view._cursor_msg, view._cursor_line) == (1, 2)  # row 5
+
+
 def test_prev_next_message_jump():
     """{ / } 相当: 途中なら現在メッセージ先頭へ、先頭なら前のメッセージ先頭へ"""
     view = _view()

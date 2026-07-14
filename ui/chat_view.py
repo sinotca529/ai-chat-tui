@@ -65,7 +65,11 @@ class AutoScrollPane(ScrollablePane):
     """
 
     def __init__(self, content: DynamicContainer) -> None:
-        super().__init__(content)
+        # keep_focused_window_visible は無効化する。画面より大きいメッセージに
+        # フォーカスがあると「その Window の上端より上へスクロールできない」
+        # 制約（min_scroll = ypos）が働き、先頭方向への手動スクロールが膠着する。
+        # 可視性の管理は keep_cursor_visible（カーソル行）に一本化する。
+        super().__init__(content, keep_focused_window_visible=False)
         self.stick_to_bottom = True
         # 直近の描画時のジオメトリ。手動スクロールのクランプに使う。
         # レイアウト構造（入力欄の高さ等）をここ以外が知る必要をなくす。
@@ -266,10 +270,14 @@ class ChatView:
         self.window.stick_to_bottom = follow
 
     def scroll_line_up(self) -> None:
+        """ビューを 1 行上へ。カーソルが画面外に出る場合は引きずる（vim の Ctrl+Y）。"""
         self.window.scroll_line_up()
+        self._drag_cursor_into_view()
 
     def scroll_line_down(self) -> None:
+        """ビューを 1 行下へ。カーソルが画面外に出る場合は引きずる（vim の Ctrl+E）。"""
         self.window.scroll_line_down()
+        self._drag_cursor_into_view()
 
     def init_browse_cursor(self) -> None:
         """browse モード進入時、カーソル未設定なら末尾メッセージの最終視覚行に置く"""
@@ -394,6 +402,62 @@ class ChatView:
     def _clamped_seg(self, segs: list[int]) -> int:
         """端末リサイズ等でセグメント数が減った場合に備えたクランプ。"""
         return min(self._cursor_seg, len(segs) - 1)
+
+    def _message_visual_rows(self, msg: int) -> int:
+        """メッセージの総視覚行数。描画済みなら実測値、未描画なら計算値。"""
+        info = self._content_windows[msg].render_info
+        if info is not None:
+            return info.window_height
+        # +1 は表示テキスト末尾の "\n" による空行
+        return sum(
+            len(self._segments(msg, line)) for line in range(self._line_counts[msg])
+        ) + 1
+
+    def _cursor_global_row(self) -> int:
+        """ペイン全体の仮想スクリーンにおけるカーソルの視覚行位置。"""
+        offset = sum(self._message_visual_rows(j) for j in range(self._cursor_msg))
+        rows_before = sum(
+            len(self._segments(self._cursor_msg, line))
+            for line in range(self._cursor_line)
+        )
+        seg = self._clamped_seg(self._segments(self._cursor_msg, self._cursor_line))
+        return offset + rows_before + seg
+
+    def _drag_cursor_into_view(self) -> None:
+        """カーソルがビューポート外に出ていたら、収まる位置まで移動させる。
+
+        カーソルが画面内にあれば ScrollablePane は keep_cursor_visible で
+        スクロール位置を変更しないため、手動スクロールとの衝突も解消される。
+        """
+        if self._cursor_msg < 0 or not self._entries:
+            return
+        pane = self.window
+        vh = max(1, pane._viewport_height)
+        scroll = pane.vertical_scroll
+        max_scroll = max(0, pane._content_height - vh)
+        # ScrollablePane の scroll_offsets（カーソル上下の余白）の内側まで
+        # 引きずらないと、次の描画でスクロールが押し戻されてしまう。
+        # コンテンツの端ではオフセットを緩和する（vim の scrolloff と同じ）。
+        offsets = pane.scroll_offsets
+        top = scroll + (offsets.top if scroll > 0 else 0)
+        bottom = scroll + vh - 1 - (offsets.bottom if scroll < max_scroll else 0)
+        for _ in range(10_000):  # 無限ループ保険
+            row = self._cursor_global_row()
+            if row < top:
+                before = (self._cursor_msg, self._cursor_line, self._cursor_seg)
+                self.move_cursor_down()
+                if self._cursor_msg < 0:  # 番兵に落ちたら末尾に戻して終了
+                    self.move_cursor_to_bottom()
+                    return
+                if (self._cursor_msg, self._cursor_line, self._cursor_seg) == before:
+                    return
+            elif row > bottom:
+                before = (self._cursor_msg, self._cursor_line, self._cursor_seg)
+                self.move_cursor_up()
+                if (self._cursor_msg, self._cursor_line, self._cursor_seg) == before:
+                    return
+            else:
+                return
 
     def _cursor_point(self) -> Point:
         """カーソルの視覚行を表す (セグメント開始文字, 論理行) の content 座標。"""
