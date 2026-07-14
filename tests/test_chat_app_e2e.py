@@ -430,6 +430,57 @@ async def test_wrap_math_matches_renderer(store):
         assert ours + 1 == rendered  # +1 は表示テキスト末尾の "\n" による空行
 
 
+async def test_attachment_send_end_to_end(store, tmp_path):
+    f = tmp_path / "notes.md"
+    f.write_text("メモの中身", encoding="utf-8")
+    api = FakeApiHandler(chunks=("読みました",))
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text(f"@{f} を要約して")
+        pipe.send_text(CTRL_D)
+        await _wait_for(lambda: len(session.current_thread()) == 2)
+
+    node = session.current_thread()[0].node
+    assert node.attachments[0]["content"] == "メモの中身"
+    assert "メモの中身" in api.sent_messages[-1]["content"]
+
+
+async def test_missing_attachment_shows_error_and_restores_input(store):
+    api = FakeApiHandler()
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text("@/no/such/file.md を読んで")
+        pipe.send_text(CTRL_D)
+        await _wait_for(lambda: "見つかりません" in session.streaming_text)
+        await _wait_for(lambda: not app._streaming)
+        assert app._input_area.text == "@/no/such/file.md を読んで"
+        assert session.current_thread() == []
+
+
+async def test_at_token_completion_and_tab_coexistence(store, tmp_path, monkeypatch):
+    """@ トークンで補完メニューが出て Tab が補完に、閉じれば Tab が browse 切替に働く"""
+    (tmp_path / "attach_target.md").write_text("x", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    api = FakeApiHandler()
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text("@attach_t")
+        # complete_while_typing で補完候補が付くのを待つ
+        await _wait_for(lambda: app._input_area.buffer.complete_state is not None)
+        pipe.send_text(TAB)  # 補完メニュー表示中の Tab は補完（browse に切り替わらない）
+        await _wait_for(lambda: app._input_area.text == "@attach_target.md")
+        assert app._mode == "input"
+
+        pipe.send_text("\x1b")  # Esc で補完メニューを閉じる
+        await _wait_for(lambda: app._input_area.buffer.complete_state is None)
+        pipe.send_text(TAB)  # メニューが閉じていれば Tab は browse 切替
+        await _wait_for(lambda: app._mode == "browse")
+
+
 async def test_ghost_text_hidden_once_typing_starts(store):
     api = FakeApiHandler()
     session = ChatSession(tree=ChatTree(), api=api, store=store)

@@ -373,6 +373,56 @@ async def test_empty_memory_adds_no_section(store, tmp_path, fake_api):
     assert fake_api.sent_messages[0]["role"] == "user"
 
 
+async def test_attachment_snapshot_and_expansion(store, fake_api, tmp_path):
+    f = tmp_path / "spec.md"
+    f.write_text("仕様書の中身", encoding="utf-8")
+    session = ChatSession(tree=ChatTree(), api=fake_api, store=store)
+
+    await session.send_message(f"これを読んで @{f}", _noop)
+
+    node = session.current_thread()[0].node
+    assert node.content == f"これを読んで @{f}"  # 本文は原文のまま保存
+    assert node.attachments[0]["content"] == "仕様書の中身"
+    # API へは展開した内容が送られる
+    sent_user = fake_api.sent_messages[-1]
+    assert "仕様書の中身" in sent_user["content"]
+
+    # 2 通目でも履歴側のユーザーメッセージに展開が乗る
+    await session.send_message("続きを", _noop)
+    assert "仕様書の中身" in fake_api.sent_messages[0]["content"]
+
+    # 永続化にもスナップショットが残る
+    loaded = store.load(session.tree_id)
+    assert loaded.thread(loaded.current_id)[0].attachments[0]["content"] == "仕様書の中身"
+
+
+async def test_missing_attachment_aborts_send(store, fake_api):
+    session = ChatSession(tree=ChatTree(), api=fake_api, store=store)
+    with pytest.raises(ValueError):
+        await session.send_message("@/no/such/file.md を読んで", _noop)
+    # ノードは作られず、ストリーミング状態もクリアされる
+    assert session.current_thread() == []
+    assert session.pending_user_msg is None
+    assert fake_api.sent_messages is None  # API 呼び出し前に中止
+
+
+async def test_old_attachment_truncated_in_history(store, tmp_path):
+    f = tmp_path / "big.md"
+    f.write_text("x" * 600, encoding="utf-8")
+    api = FakeApiHandler(chunks=("回答",))
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    await session.send_message(f"@{f} を読んで", _noop)
+    for i in range(3):
+        await session.send_message(f"続き{i}", _noop)
+
+    # 最初のユーザーメッセージは直近 4 ノードより古いので添付が縮約される
+    first_user = api.sent_messages[0]["content"]
+    assert "x" * 500 in first_user
+    assert "x" * 501 not in first_user
+    assert "省略" in first_user
+
+
 async def test_generate_title_saves_tree(session, store):
     await session.send_message("hi", _noop)
     title = await session.generate_title()

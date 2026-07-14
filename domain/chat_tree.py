@@ -68,10 +68,18 @@ class ChatTree:
         role: Role,
         content: str,
         tool_messages: tuple = (),
+        attachments: tuple = (),
     ) -> int:
         node_id = len(self._nodes)
         self._nodes.append(
-            Node(id=node_id, role=role, content=content, parent_id=parent_id, tool_messages=tool_messages)
+            Node(
+                id=node_id,
+                role=role,
+                content=content,
+                parent_id=parent_id,
+                tool_messages=tool_messages,
+                attachments=attachments,
+            )
         )
         return node_id
 
@@ -118,6 +126,7 @@ class ChatTree:
                     "content": n.content,
                     "parent_id": n.parent_id,
                     "tool_messages": list(n.tool_messages),
+                    "attachments": list(n.attachments),
                 }
                 for n in self._nodes
             ],
@@ -132,6 +141,7 @@ class ChatTree:
                 content=n["content"],
                 parent_id=n["parent_id"],
                 tool_messages=tuple(n.get("tool_messages", [])),
+                attachments=tuple(n.get("attachments", [])),
             )
             for n in data["nodes"]
         ]

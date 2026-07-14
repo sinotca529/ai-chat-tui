@@ -2,6 +2,7 @@ import json
 from collections.abc import Callable
 from domain.chat_tree import ChatTree
 from domain.role import Role
+from application.attachments import expand_message, load_attachments
 from application.thread_entry import ThreadEntry
 from infrastructure.api_handler import ApiHandler, ToolIndicator
 from infrastructure.chat_tree_store import ChatTreeStore
@@ -142,7 +143,12 @@ class ChatSession:
                 if i < recent_boundary:
                     tool_msgs = [_truncate_old_tool_result(m) for m in tool_msgs]
                 messages.extend(tool_msgs)
-            messages.append({"role": str(e.node.role), "content": e.node.content})
+            content = e.node.content
+            if e.node.attachments:
+                # 古いノードの添付はツール結果と同じ方針で縮約して送る
+                limit = None if i >= recent_boundary else _OLD_TOOL_RESULT_MAX_CHARS
+                content = expand_message(content, e.node.attachments, max_chars=limit)
+            messages.append({"role": str(e.node.role), "content": content})
         system_parts = []
         if self.effective_system_prompt:
             system_parts.append(self.effective_system_prompt)
@@ -190,13 +196,17 @@ class ChatSession:
         self._display_text = ""
         self._save_text = ""
         try:
-            if await self._maybe_compact(msg):
+            # 添付の読み込み失敗（パス間違い等）は ValueError として伝播し、
+            # ChatApp がエラー表示 + 入力欄復元を行う
+            attachments = load_attachments(msg)
+            expanded = expand_message(msg, attachments)
+            if await self._maybe_compact(expanded):
                 # 表示専用の通知。_save_text には入れないためツリーには残らない。
                 self._display_text = "[コンテキストを圧縮しました]\n"
                 invalidate()
             thread_messages = self._build_thread_messages()
             async for chunk in self._api.stream(
-                thread_messages + [{"role": "user", "content": msg}]
+                thread_messages + [{"role": "user", "content": expanded}]
             ):
                 self._display_text += chunk
                 if not isinstance(chunk, ToolIndicator):
@@ -207,7 +217,9 @@ class ChatSession:
                 return
 
             tool_messages = tuple(self._api.last_tool_messages)
-            user_id = self._tree.insert(self._tree.current_id, Role.USER, msg)
+            user_id = self._tree.insert(
+                self._tree.current_id, Role.USER, msg, attachments=attachments
+            )
             asst_id = self._tree.insert(user_id, Role.ASSISTANT, self._save_text, tool_messages=tool_messages)
             self._tree.set_current(asst_id)
             try:

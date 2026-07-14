@@ -10,10 +10,10 @@ from ui.chat_view import ChatView, _RowEntry
 
 def _entry(node_id: int, role: Role, content: str, parent_id: int | None = None,
            sibling_index: int = 1, sibling_count: int = 1,
-           tool_messages: tuple = ()) -> ThreadEntry:
+           tool_messages: tuple = (), attachments: tuple = ()) -> ThreadEntry:
     return ThreadEntry(
         node=Node(id=node_id, role=role, content=content, parent_id=parent_id,
-                  tool_messages=tool_messages),
+                  tool_messages=tool_messages, attachments=attachments),
         sibling_index=sibling_index,
         sibling_count=sibling_count,
     )
@@ -54,6 +54,21 @@ def test_row_entry_tolerates_broken_tool_arguments():
         _entry(1, Role.ASSISTANT, "回答", tool_messages=tool_messages)
     )
     assert entry.tool_calls == (("web_search", {}),)
+
+
+def test_attachment_chip_extracted_and_rendered():
+    from ui.chat_view import _RowEntry
+    entry = _entry(
+        0, Role.USER, "読んで @/tmp/spec.md",
+        attachments=({"path": "/tmp/spec.md", "content": "中身中身"},),
+    )
+    row = _RowEntry.from_thread_entry(entry)
+    assert row.attachments == (("spec.md", 4),)
+
+    view = _view()
+    frags = view._render_entry(row, 0)
+    chips = [(s, t) for s, t in frags if "添付" in t]
+    assert chips == [("fg:ansiyellow", "\n  [添付: spec.md (4文字)]")]
 
 
 def test_render_entry_appends_tool_call_line_in_yellow():

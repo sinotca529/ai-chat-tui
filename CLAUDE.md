@@ -68,11 +68,12 @@ UI 層 → アプリケーション層 → ドメイン層
 
 **ドメイン層 (`domain/`)**
 - `role.py` — `Role` (StrEnum: USER / ASSISTANT)
-- `node.py` — `Node` (frozen dataclass: id, role, content, parent_id, tool_messages)。`tool_messages` はツール呼び出しを伴う ASSISTANT ノードに付与される中間 API メッセージ列（`role: assistant/tool` のメッセージ）。表示には使わず、スレッド再構築時に最終応答の直前に注入してコンテキストを維持する。
+- `node.py` — `Node` (frozen dataclass: id, role, content, parent_id, tool_messages, attachments)。`tool_messages` はツール呼び出しを伴う ASSISTANT ノードに付与される中間 API メッセージ列（`role: assistant/tool` のメッセージ）。表示には使わず、スレッド再構築時に最終応答の直前に注入してコンテキストを維持する。`attachments` は USER ノードの添付ファイルスナップショット（`{"path", "content"}` のタプル列。送信時点の内容を保存するため後からファイルが変わっても会話の再現性が保たれる）。
 - `chat_tree.py` — `ChatTree`: append-only ツリー。子・兄弟は `parent_id` から導出。`title` / `system_prompt` / `summary` / `summary_upto_id` フィールドを持つ（後者 2 つはコンテキスト圧縮用。1 ツリーに 1 スロット）。`rollback()` で末尾ノードを pop し `current_id` を親に戻す。
 
 **アプリケーション層 (`application/`)**
 - `thread_entry.py` — `ThreadEntry` (frozen dataclass: node + sibling_index + sibling_count)
+- `attachments.py` — `@パス` トークンの解析・読み込み（`load_attachments`）と API 送信用の展開（`expand_message`）。
 - `chat_session.py` — `ChatSession`: UI が直接触る唯一のインターフェース。ツリー操作・API 呼び出し・永続化を束ねる。ストリーミング状態 (`_streaming_text` / `_pending_user_msg` / `_error_text`) も保持し、ChatView の唯一の描画ソースとなる。
 
 **インフラストラクチャ層 (`infrastructure/`)**
@@ -100,7 +101,7 @@ UI 層 → アプリケーション層 → ドメイン層
 **キーバインド**:
 - `Ctrl+D` — 送信
 - `Ctrl+C` — ストリーミング中はキャンセル、それ以外は終了
-- `Tab` / `Esc` — input ↔ browse 切り替え
+- `Tab` / `Esc` — input ↔ browse 切り替え（`@パス` 補完メニュー表示中は `Tab` = 補完循環、`Esc` = メニューを閉じる。browse 切替は `~has_completions` のときのみ）
 - `Ctrl+T` — ツリー選択オーバーレイをトグル
 - `Ctrl+O` — モデル選択オーバーレイをトグル
 - `Ctrl+P` — システムプロンプト編集オーバーレイをトグル
@@ -120,6 +121,8 @@ UI 層 → アプリケーション層 → ドメイン層
 **ストリーミング**: `asyncio.ensure_future` でバックグラウンド実行。`ChatSession.send_message(msg, invalidate)` はコルーチンで、トークンを受け取るたびに `invalidate()` を呼んで差分再描画を促す。ストリーミング中は `ChatSession._pending_user_msg` / `_streaming_text` に状態を保持し、`ChatView` はこれを直接参照して `_pending_window` / `_stream_window` を表示する。ツリーへの書き込みはストリーミング完了後にのみ行われるため、キャンセルや API エラー時のロールバックは不要。`save()` 失敗時のみ `ChatTree.rollback()` を 2 回呼んで user / assistant ノードを取り消す。**ストリーミング開始前の不変条件**: `_pending_window` は `ChatView._rows`（`update()` で構築済みの行リスト）の末尾に追加される。そのためブランチ編集（`e` キー）経由で送信する場合は、`navigate_to` で `current_id` を分岐点に移動した直後に `_refresh_chat_view()` を呼び、`_rows` を分岐点までの状態に更新してからストリーミングを開始しなければならない。
 
 **コンテキスト圧縮（コンパクション）**: `config.toml` の `[api] context_window`（トークン数）を設定したときのみ有効（未設定なら無効 = opt-in）。送信前にリクエスト全体の推定トークン数が `context_window × 0.7` を超えたら、直近 4 ノードを残して古いノードを `ApiHandler.summarize()` で要約し、`ChatTree.summary` / `summary_upto_id` に保存する。トークン推定は「JSON 直列化長 × 1 文字 ≈ 1 トークン」の保守的近似（日本語で安全側、英語では早めに圧縮が走るだけ）。API 送信時は要約を system メッセージに合成し（`[これまでの会話の要約]` セクション）、要約済みノードは送らない。**ツリー構造・表示は一切変更しない**（append-only 維持、全ノードは browse で閲覧可能）。要約は 1 ツリーに 1 スロットで、`summary_upto_id` が現在のスレッドパス上にない間（別ブランチ閲覧中）は適用されず全ノードを生で送る。再圧縮は「旧要約 + 差分ノード」を入力とする増分方式。圧縮実行時はストリーミング表示の先頭に表示専用の `[コンテキストを圧縮しました]` を出す（ツリーには保存しない）。
+
+**添付ファイル**: ユーザーメッセージ中の `@パス` トークンを送信時に読み込み、`Node.attachments` にスナップショットとして保存する。対応形式は `@path`・`@"引用"`・`@'引用'`・`@path\ with\ space`（バックスラッシュエスケープ。端末への D&D ペースト形式を吸収）で、`~` は展開する。Windows のドライブレター形式（`C:\`・`C:/`）と UNC（`\\server\...`）もパス風として扱い、Git Bash (MSYS) 形式 `/c/...` は存在しない場合に `C:/...` へ読み替えて再試行する（WT + Git Bash の D&D 対応）。本文（`node.content`）は原文のまま保存・表示し、その下にツール呼び出しと同形式の黄色チップ `[添付: 名前 (N文字)]` を表示。API 送信時に本文の後ろへ `[添付ファイル: パス]` + フェンス付きで展開する。**存在しないパス風トークン**（`/`・`~`・`./`・`../` 始まりまたは引用付き）は ValueError で送信中止（エラー表示 + 入力欄復元）、パス風でない `@` トークン（メールアドレス等）は無視。テキストのみ対応（バイナリ・非 UTF-8・5 MiB 超は拒否）、内容は 20,000 文字で切り詰め。直近 4 ノードより古いノードの添付は 500 文字に縮約して送る（ツール結果と同方式）。入力欄では `@` で始まるトークンに `PathCompleter` の補完ポップアップが出る（`_AttachPathCompleter`）。
 
 **メモリ機能**: 書き込みと読み出しが非対称。書き込みは `save_memory` ツール（description で「ユーザーの明示的な指示があったときのみ」に制限）、読み出しはツールを使わず**全件を system メッセージに無条件注入**する（`[ユーザーに関する記憶]` セクション、システムプロンプトと要約の間）。ローカルの小型モデルはツール連鎖が苦手なため、読み出しをモデルの判断に依存させない設計。メモリが空なら注入しない。削除・編集は `memory.json` の手編集で行う（`forget` ツールは誤発火リスクから非搭載）。
 
