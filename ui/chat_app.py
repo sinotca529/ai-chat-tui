@@ -279,15 +279,19 @@ class ChatApp:
 
         @kb.add("c-y", filter=is_browse)
         def _scroll_up(event):
-            # ペイン内の Window からフォーカスを外し、手動スクロールが
-            # keep_focused_window_visible に上書きされないようにする
-            event.app.layout.focus(self._input_area)
+            # カーソルはビュー内に引きずられる（vim 同様）ため、カーソルが
+            # 画面内にある限り ScrollablePane が手動スクロールを上書きしない
             self._chat_view.scroll_line_up()
+            win = self._chat_view.selected_content_window()
+            if win:
+                event.app.layout.focus(win)
 
         @kb.add("c-e", filter=is_browse)
         def _scroll_down(event):
-            event.app.layout.focus(self._input_area)
             self._chat_view.scroll_line_down()
+            win = self._chat_view.selected_content_window()
+            if win:
+                event.app.layout.focus(win)
 
         @kb.add("up", filter=is_browse)
         @kb.add("k", filter=is_browse)

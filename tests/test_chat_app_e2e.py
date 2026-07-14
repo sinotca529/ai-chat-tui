@@ -267,6 +267,37 @@ async def test_browse_manual_scroll_moves_one_line(store):
         assert app._chat_view.window.vertical_scroll == 0
 
 
+async def test_scroll_keeps_cursor_visible_and_view_does_not_jump_back(store):
+    """C-y/C-e でカーソルがビュー内に追従し、直後の j/k でビューが巻き戻らないこと"""
+    api = FakeApiHandler(chunks=("行\n" * 60,))
+    session = ChatSession(tree=ChatTree(), api=api, store=store)
+
+    def cursor_visible(app) -> bool:
+        view, pane = app._chat_view, app._chat_view.window
+        row = view._cursor_global_row()
+        return pane.vertical_scroll <= row < pane.vertical_scroll + pane._viewport_height
+
+    async with _running_app(session) as (app, pipe):
+        pipe.send_text("長い応答をください")
+        pipe.send_text(CTRL_D)
+        await _wait_for(lambda: len(session.current_thread()) == 2)
+        pipe.send_text(TAB)
+        await _wait_for(lambda: app._mode == "browse")
+        start = await asyncio.wait_for(_settled_scroll(app), timeout=5)
+
+        for _ in range(20):
+            pipe.send_text("\x19")  # Ctrl+Y × 20
+        await _wait_for(lambda: app._chat_view.window.vertical_scroll == start - 20)
+        assert cursor_visible(app)  # カーソルが画面外に置き去りになっていない
+
+        # 置き去りカーソルへの巻き戻りが起きない（従来のバグ）
+        scroll_before = await asyncio.wait_for(_settled_scroll(app), timeout=5)
+        pipe.send_text("k")
+        await asyncio.sleep(0.3)
+        assert app._chat_view.window.vertical_scroll == scroll_before
+        assert cursor_visible(app)
+
+
 async def test_browse_mode_disables_autoscroll_until_next_send(store):
     api = FakeApiHandler()
     session = ChatSession(tree=ChatTree(), api=api, store=store)
