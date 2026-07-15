@@ -179,16 +179,14 @@ class ChatApp:
         @kb.add("f1", filter=is_help_overlay)
         def _toggle_help(event):
             if self._mode == "help_overlay":
-                self._mode = "input"
-                event.app.layout.focus(self._input_area)
+                self._enter_input_mode(event)
             else:
                 self._mode = "help_overlay"
                 event.app.layout.focus(self._help_overlay.window.body)
 
         @kb.add("escape", filter=is_help_overlay)
         def _close_help(event):
-            self._mode = "input"
-            event.app.layout.focus(self._input_area)
+            self._enter_input_mode(event)
 
         @kb.add("c-c", filter=is_streaming)
         def _cancel_stream(event):
@@ -260,9 +258,7 @@ class ChatApp:
             # 過去メッセージを読むモードに入るので下端追従を止める
             self._chat_view.set_follow_bottom(False)
             self._chat_view.init_browse_cursor()
-            win = self._chat_view.selected_content_window()
-            if win:
-                event.app.layout.focus(win)
+            self._focus_cursor(event)
 
         @kb.add("escape", filter=is_input)
         def _cancel_branch(event):
@@ -274,70 +270,53 @@ class ChatApp:
         @kb.add("tab", filter=is_browse)
         @kb.add("escape", filter=is_browse)
         def _to_input(event):
-            self._mode = "input"
-            event.app.layout.focus(self._input_area)
+            self._enter_input_mode(event)
 
         @kb.add("c-y", filter=is_browse)
         def _scroll_up(event):
             # カーソルはビュー内に引きずられる（vim 同様）ため、カーソルが
             # 画面内にある限り ScrollablePane が手動スクロールを上書きしない
             self._chat_view.scroll_line_up()
-            win = self._chat_view.selected_content_window()
-            if win:
-                event.app.layout.focus(win)
+            self._focus_cursor(event)
 
         @kb.add("c-e", filter=is_browse)
         def _scroll_down(event):
             self._chat_view.scroll_line_down()
-            win = self._chat_view.selected_content_window()
-            if win:
-                event.app.layout.focus(win)
+            self._focus_cursor(event)
 
         @kb.add("up", filter=is_browse)
         @kb.add("k", filter=is_browse)
         def _browse_up(event):
             self._chat_view.move_cursor_up()
-            win = self._chat_view.selected_content_window()
-            if win:
-                event.app.layout.focus(win)
+            self._focus_cursor(event)
 
         @kb.add("down", filter=is_browse)
         @kb.add("j", filter=is_browse)
         def _browse_down(event):
             self._chat_view.move_cursor_down()
-            win = self._chat_view.selected_content_window()
-            if win:
-                event.app.layout.focus(win)
+            self._focus_cursor(event)
 
         @kb.add("{", filter=is_browse)
         @kb.add("[", "[", filter=is_browse)
         def _prev_message(event):
             self._chat_view.move_cursor_to_prev_message()
-            win = self._chat_view.selected_content_window()
-            if win:
-                event.app.layout.focus(win)
+            self._focus_cursor(event)
 
         @kb.add("}", filter=is_browse)
         @kb.add("]", "]", filter=is_browse)
         def _next_message(event):
             self._chat_view.move_cursor_to_next_message()
-            win = self._chat_view.selected_content_window()
-            if win:
-                event.app.layout.focus(win)
+            self._focus_cursor(event)
 
         @kb.add("g", "g", filter=is_browse)
         def _cursor_top(event):
             self._chat_view.move_cursor_to_top()
-            win = self._chat_view.selected_content_window()
-            if win:
-                event.app.layout.focus(win)
+            self._focus_cursor(event)
 
         @kb.add("G", filter=is_browse)
         def _cursor_bottom(event):
             self._chat_view.move_cursor_to_bottom()
-            win = self._chat_view.selected_content_window()
-            if win:
-                event.app.layout.focus(win)
+            self._focus_cursor(event)
 
         @kb.add("left", filter=is_browse)
         @kb.add("h", filter=is_browse)
@@ -364,8 +343,7 @@ class ChatApp:
             self._input_area.text = entry.node.content
             self._branch_editing = True
             self._branch_target_id = entry.node.parent_id
-            self._mode = "input"
-            event.app.layout.focus(self._input_area)
+            self._enter_input_mode(event)
 
         # 新規チャット
         @kb.add("c-n", filter=~is_any_overlay & not_streaming)
@@ -374,9 +352,8 @@ class ChatApp:
             self._branch_editing = False
             self._branch_target_id = None
             self._chat_view.set_follow_bottom(True)
-            self._mode = "input"
             self._refresh_chat_view()
-            event.app.layout.focus(self._input_area)
+            self._enter_input_mode(event)
 
         # ツリー選択オーバーレイ
         @kb.add("c-t", filter=~is_any_overlay)
@@ -388,8 +365,7 @@ class ChatApp:
 
         @kb.add("c-t", filter=is_tree_overlay)
         def _close_tree_overlay(event):
-            self._mode = "input"
-            event.app.layout.focus(self._input_area)
+            self._enter_input_mode(event)
 
         @kb.add("up", filter=is_tree_overlay)
         @kb.add("k", filter=is_tree_overlay)
@@ -411,9 +387,8 @@ class ChatApp:
             self._branch_editing = False
             self._branch_target_id = None
             self._chat_view.set_follow_bottom(True)  # 末尾（最新メッセージ）を表示
-            self._mode = "input"
             self._refresh_chat_view()
-            event.app.layout.focus(self._input_area)
+            self._enter_input_mode(event)
 
         @kb.add("d", filter=is_tree_overlay & ~is_tree_confirming)
         def _tree_delete_start(event):
@@ -444,14 +419,12 @@ class ChatApp:
         @kb.add("escape", filter=is_system_overlay)
         @kb.add("c-p", filter=is_system_overlay)
         def _close_system_overlay(event):
-            self._mode = "input"
-            event.app.layout.focus(self._input_area)
+            self._enter_input_mode(event)
 
         @kb.add("c-d", filter=is_system_overlay)
         def _save_system_prompt(event):
             self._session.set_system_prompt(self._system_overlay.text.strip())
-            self._mode = "input"
-            event.app.layout.focus(self._input_area)
+            self._enter_input_mode(event)
 
         # モデル選択オーバーレイ
         @kb.add("c-o", filter=~is_any_overlay)
@@ -463,8 +436,7 @@ class ChatApp:
 
         @kb.add("c-o", filter=is_model_overlay)
         def _close_model_overlay(event):
-            self._mode = "input"
-            event.app.layout.focus(self._input_area)
+            self._enter_input_mode(event)
 
         @kb.add("up", filter=is_model_overlay)
         @kb.add("k", filter=is_model_overlay)
@@ -481,8 +453,7 @@ class ChatApp:
             model_id = self._model_overlay.selected_model()
             if model_id is not None:
                 self._session.set_model(model_id)
-            self._mode = "input"
-            event.app.layout.focus(self._input_area)
+            self._enter_input_mode(event)
 
         # 補完メニュー表示中のキー（後に登録したバインドが優先されるため最後に置く）
         @kb.add("tab", filter=is_input & has_completions)
@@ -494,6 +465,16 @@ class ChatApp:
             event.current_buffer.cancel_completion()
 
         return kb
+
+    def _focus_cursor(self, event) -> None:
+        """カーソル行が属するメッセージ Window にフォーカスを移す"""
+        win = self._chat_view.selected_content_window()
+        if win:
+            event.app.layout.focus(win)
+
+    def _enter_input_mode(self, event) -> None:
+        self._mode = "input"
+        event.app.layout.focus(self._input_area)
 
     def _switch_sibling(self, direction: int) -> None:
         entry = self._chat_view.selected_entry()

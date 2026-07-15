@@ -316,9 +316,8 @@ class ChatView:
         """末尾メッセージの最終視覚行へ（vim の G 相当）"""
         if not self._entries:
             return
-        self._cursor_msg = len(self._entries) - 1
-        self._cursor_line = self._line_counts[self._cursor_msg] - 1
-        self._cursor_seg = len(self._segments(self._cursor_msg, self._cursor_line)) - 1
+        rows = self._visual_rows()
+        self._set_cursor_to_row(rows, len(rows) - 1, step=-1)
 
     def selected_entry(self) -> ThreadEntry | None:
         if 0 <= self._cursor_msg < len(self._entries):
@@ -352,38 +351,16 @@ class ChatView:
         if self._cursor_msg < 0:
             self.init_browse_cursor()
             return
-        self._cursor_seg = self._clamped_seg(
-            self._segments(self._cursor_msg, self._cursor_line)
-        )
-        if self._cursor_seg > 0:
-            self._cursor_seg -= 1
-        elif self._cursor_line > 0:
-            self._cursor_line -= 1
-            self._cursor_seg = len(self._segments(self._cursor_msg, self._cursor_line)) - 1
-        elif self._cursor_msg > 0:
-            self._cursor_msg -= 1
-            self._cursor_line = self._line_counts[self._cursor_msg] - 1
-            self._cursor_seg = len(self._segments(self._cursor_msg, self._cursor_line)) - 1
+        rows = self._visual_rows()
+        self._set_cursor_to_row(rows, self._cursor_global_row() - 1, step=-1)
 
     def move_cursor_down(self) -> None:
         """1 視覚行下へ。末尾を超えると選択なし（番兵）に戻る。"""
         if not self._entries or self._cursor_msg < 0:
             return
-        segs = self._segments(self._cursor_msg, self._cursor_line)
-        self._cursor_seg = self._clamped_seg(segs)
-        if self._cursor_seg < len(segs) - 1:
-            self._cursor_seg += 1
-        elif self._cursor_line < self._line_counts[self._cursor_msg] - 1:
-            self._cursor_line += 1
-            self._cursor_seg = 0
-        elif self._cursor_msg < len(self._entries) - 1:
-            self._cursor_msg += 1
-            self._cursor_line = 0
-            self._cursor_seg = 0
-        else:
-            self._cursor_msg = -1
-            self._cursor_line = 0
-            self._cursor_seg = 0
+        rows = self._visual_rows()
+        if not self._set_cursor_to_row(rows, self._cursor_global_row() + 1, step=1):
+            self._cursor_msg, self._cursor_line, self._cursor_seg = -1, 0, 0
 
     # ── 折り返し計算 ──────────────────────────────────────────────────────────
 
@@ -403,19 +380,38 @@ class ChatView:
         """端末リサイズ等でセグメント数が減った場合に備えたクランプ。"""
         return min(self._cursor_seg, len(segs) - 1)
 
-    def _message_visual_rows(self, msg: int) -> int:
-        """メッセージの総視覚行数。描画済みなら実測値、未描画なら計算値。"""
-        info = self._content_windows[msg].render_info
-        if info is not None:
-            return info.window_height
-        # +1 は表示テキスト末尾の "\n" による空行
-        return sum(
-            len(self._segments(msg, line)) for line in range(self._line_counts[msg])
-        ) + 1
+    def _visual_rows(self) -> list[tuple[int, int, int] | None]:
+        """通し視覚行番号 → カーソル位置 (msg, line, seg) の対応表。
+
+        メッセージ末尾の空行（カーソルを置けない行）は None。この表の
+        index は描画上の視覚行番号と一致する（整合はオラクルテスト
+        test_wrap_math_matches_renderer が保証する）。
+        """
+        rows: list[tuple[int, int, int] | None] = []
+        for m in range(len(self._entries)):
+            for line in range(self._line_counts[m]):
+                for seg in range(len(self._segments(m, line))):
+                    rows.append((m, line, seg))
+            rows.append(None)
+        return rows
+
+    def _set_cursor_to_row(self, rows, row: int, step: int) -> bool:
+        """row から step 方向に最も近いカーソル可能行へ移動する。範囲外なら False。"""
+        while 0 <= row < len(rows) and rows[row] is None:
+            row += step
+        if not (0 <= row < len(rows)):
+            return False
+        self._cursor_msg, self._cursor_line, self._cursor_seg = rows[row]
+        return True
 
     def _cursor_global_row(self) -> int:
         """ペイン全体の仮想スクリーンにおけるカーソルの視覚行位置。"""
-        offset = sum(self._message_visual_rows(j) for j in range(self._cursor_msg))
+        offset = 0
+        for m in range(self._cursor_msg):
+            # +1 は表示テキスト末尾の "\n" による空行
+            offset += sum(
+                len(self._segments(m, line)) for line in range(self._line_counts[m])
+            ) + 1
         rows_before = sum(
             len(self._segments(self._cursor_msg, line))
             for line in range(self._cursor_line)
@@ -424,7 +420,7 @@ class ChatView:
         return offset + rows_before + seg
 
     def _drag_cursor_into_view(self) -> None:
-        """カーソルがビューポート外に出ていたら、収まる位置まで移動させる。
+        """カーソルがビューポート外に出ていたら、ビュー内の端の行へ移動させる。
 
         カーソルが画面内にあれば ScrollablePane は keep_cursor_visible で
         スクロール位置を変更しないため、手動スクロールとの衝突も解消される。
@@ -441,23 +437,13 @@ class ChatView:
         offsets = pane.scroll_offsets
         top = scroll + (offsets.top if scroll > 0 else 0)
         bottom = scroll + vh - 1 - (offsets.bottom if scroll < max_scroll else 0)
-        for _ in range(10_000):  # 無限ループ保険
-            row = self._cursor_global_row()
-            if row < top:
-                before = (self._cursor_msg, self._cursor_line, self._cursor_seg)
-                self.move_cursor_down()
-                if self._cursor_msg < 0:  # 番兵に落ちたら末尾に戻して終了
-                    self.move_cursor_to_bottom()
-                    return
-                if (self._cursor_msg, self._cursor_line, self._cursor_seg) == before:
-                    return
-            elif row > bottom:
-                before = (self._cursor_msg, self._cursor_line, self._cursor_seg)
-                self.move_cursor_up()
-                if (self._cursor_msg, self._cursor_line, self._cursor_seg) == before:
-                    return
-            else:
-                return
+        row = self._cursor_global_row()
+        rows = self._visual_rows()
+        if row < top:
+            if not self._set_cursor_to_row(rows, min(top, len(rows) - 1), step=1):
+                self.move_cursor_to_bottom()
+        elif row > bottom:
+            self._set_cursor_to_row(rows, max(0, min(bottom, len(rows) - 1)), step=-1)
 
     def _cursor_point(self) -> Point:
         """カーソルの視覚行を表す (セグメント開始文字, 論理行) の content 座標。"""
