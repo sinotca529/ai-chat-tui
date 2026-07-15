@@ -274,6 +274,39 @@ async def test_scroll_keeps_cursor_visible_and_view_does_not_jump_back(store):
         assert cursor_visible(app)
 
 
+async def test_j_at_bottom_does_not_rewind_view(store):
+    """最下部でさらに j を押してもビューが巻き戻らないこと。
+
+    従来はカーソルが番兵 (-1) になり、フォーカス中 Window のカーソル位置が
+    デフォルト (0,0) に落ちて最後のメッセージの先頭までスクロールが巻き
+    戻っていた。
+    """
+    async with _start_app(store, chunks=("行\n" * 50,)) as (app, pipe, session, api):
+        for msg in ("q1", "q2"):
+            pipe.send_text(msg)
+            pipe.send_text(CTRL_D)
+            await _wait_for(lambda: not app._streaming and bool(session.current_thread()))
+        await _wait_for(lambda: len(session.current_thread()) == 4)
+
+        pipe.send_text(TAB)
+        await _wait_for(lambda: app._mode == "browse")
+        bottom = await asyncio.wait_for(_settled_scroll(app), timeout=5)
+        assert bottom > 0
+        cursor_before = (app._chat_view._cursor_msg, app._chat_view._cursor_line)
+
+        pipe.send_text("j")  # 末尾でさらに下へ
+        pipe.send_text("j")
+        await asyncio.sleep(0.4)
+        # ビューは巻き戻らず、カーソルも末尾に留まる
+        assert app._chat_view.window.vertical_scroll == bottom
+        assert (app._chat_view._cursor_msg, app._chat_view._cursor_line) == cursor_before
+
+        pipe.send_text("k")  # 直後の k は 1 視覚行だけ上がる
+        await asyncio.sleep(0.3)
+        assert app._chat_view.window.vertical_scroll in (bottom, bottom - 1)
+        assert app._chat_view.selected_entry() is not None
+
+
 async def test_browse_mode_disables_autoscroll_until_next_send(store):
     async with _start_app(store) as (app, pipe, session, api):
         assert app._chat_view.window.stick_to_bottom  # 初期状態は追従 ON

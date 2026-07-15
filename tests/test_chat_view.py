@@ -90,7 +90,7 @@ def test_update_builds_one_row_per_entry():
     assert view.last_content_window() is view._content_windows[-1]
 
 
-def test_cursor_starts_at_last_entry_and_wraps_to_sentinel():
+def test_cursor_starts_at_last_entry_and_stops_at_bottom():
     view = _view()
     view.update([
         _entry(0, Role.USER, "q"),
@@ -103,10 +103,10 @@ def test_cursor_starts_at_last_entry_and_wraps_to_sentinel():
     view.move_cursor_up()
     assert view.selected_entry().node.id == 1
     view.move_cursor_down()
-    view.move_cursor_down()  # 末尾を超えると番兵 (-1) に戻り選択なしになる
-    assert view.selected_entry() is None
-    view.move_cursor_up()  # 番兵から上移動で末尾に復帰
+    view.move_cursor_down()  # 末尾の視覚行では留まる（番兵化しない）
     assert view.selected_entry().node.id == 2
+    view.move_cursor_up()
+    assert view.selected_entry().node.id == 1
 
 
 def test_wrap_starts_ascii():
@@ -152,8 +152,9 @@ def test_visual_line_movement_within_wrapped_line(monkeypatch):
     view.move_cursor_down()
     assert view._cursor_seg == 1
     view.move_cursor_down()
-    view.move_cursor_down()  # 最終視覚行を超えると番兵へ
-    assert view.selected_entry() is None
+    view.move_cursor_down()  # 最終視覚行で停止
+    assert (view._cursor_line, view._cursor_seg) == (0, 2)
+    assert view.selected_entry() is not None
 
 
 def test_only_cursor_visual_row_is_highlighted(monkeypatch):
@@ -211,8 +212,8 @@ def test_cursor_to_top_and_bottom(monkeypatch):
     # "* " + 200 文字 = 202 文字 → 3 視覚行の最終セグメント
     assert (view._cursor_msg, view._cursor_line, view._cursor_seg) == (1, 0, 2)
 
-    # 番兵状態（選択なし）からも直接ジャンプできる
-    view.move_cursor_down()  # 末尾を超えて番兵へ
+    # 番兵状態（ブラウズ未進入 = 選択なし）からも直接ジャンプできる
+    view._cursor_msg = -1
     assert view.selected_entry() is None
     view.move_cursor_to_top()
     assert (view._cursor_msg, view._cursor_line, view._cursor_seg) == (0, 0, 0)
@@ -261,9 +262,8 @@ def test_prev_next_message_jump():
     view.move_cursor_to_next_message()  # 末尾メッセージでは留まる（番兵に落ちない）
     assert (view._cursor_msg, view._cursor_line) == (1, 0)
 
-    # 番兵からの { は末尾メッセージの先頭へ
-    view.move_cursor_to_bottom()
-    view.move_cursor_down()
+    # 番兵（ブラウズ未進入）からの { は末尾メッセージの先頭へ
+    view._cursor_msg = -1
     assert view.selected_entry() is None
     view.move_cursor_to_prev_message()
     assert (view._cursor_msg, view._cursor_line) == (1, 0)

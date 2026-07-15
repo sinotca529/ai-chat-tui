@@ -355,12 +355,17 @@ class ChatView:
         self._set_cursor_to_row(rows, self._cursor_global_row() - 1, step=-1)
 
     def move_cursor_down(self) -> None:
-        """1 視覚行下へ。末尾を超えると選択なし（番兵）に戻る。"""
+        """1 視覚行下へ。末尾の視覚行では留まる（vim 同様）。
+
+        番兵（-1）にはしない: カーソルが消えるとフォーカス中 Window の
+        カーソル位置が prompt_toolkit のデフォルト (0,0) に落ち、
+        keep_cursor_visible がそのメッセージの先頭までビューを
+        巻き戻してしまう。番兵は「ブラウズ未進入」の初期状態のみ。
+        """
         if not self._entries or self._cursor_msg < 0:
             return
         rows = self._visual_rows()
-        if not self._set_cursor_to_row(rows, self._cursor_global_row() + 1, step=1):
-            self._cursor_msg, self._cursor_line, self._cursor_seg = -1, 0, 0
+        self._set_cursor_to_row(rows, self._cursor_global_row() + 1, step=1)
 
     # ── 折り返し計算 ──────────────────────────────────────────────────────────
 
