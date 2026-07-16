@@ -100,12 +100,16 @@ class AutoScrollPane(ScrollablePane):
             screen, mouse_handlers, write_position, parent_style, erase_bg, z_index
         )
 
+    def scroll_rows(self, delta: int) -> None:
+        """delta 行スクロールする（上下端でクランプ）。"""
+        max_scroll = max(0, self._content_height - self._viewport_height)
+        self.vertical_scroll = max(0, min(self.vertical_scroll + delta, max_scroll))
+
     def scroll_line_up(self) -> None:
-        self.vertical_scroll = max(0, self.vertical_scroll - 1)
+        self.scroll_rows(-1)
 
     def scroll_line_down(self) -> None:
-        max_scroll = max(0, self._content_height - self._viewport_height)
-        self.vertical_scroll = min(self.vertical_scroll + 1, max_scroll)
+        self.scroll_rows(1)
 
 
 _CURSOR_LINE_STYLE = "bg:#1e4272"
@@ -279,6 +283,27 @@ class ChatView:
     def scroll_line_down(self) -> None:
         """ビューを 1 行下へ。カーソルが画面外に出る場合は引きずる（vim の Ctrl+E）。"""
         self.window.scroll_line_down()
+        self._drag_cursor_into_view()
+
+    def scroll_half_page(self, direction: int) -> None:
+        """半ページ分、スクロールとカーソルを同時に動かす（vim の Ctrl+D/Ctrl+U）。
+
+        カーソルの画面内相対位置を保つ。スクロールは端でクランプされるが、
+        カーソル移動は独立に行う（vim 同様、最下部でもカーソルだけは
+        末尾まで進む）。direction は +1 で下、-1 で上。
+        """
+        if not self._entries:
+            return
+        if self._cursor_msg < 0:
+            self.init_browse_cursor()
+            return
+        pane = self.window
+        half = max(1, pane._viewport_height // 2)
+        pane.scroll_rows(direction * half)
+        self._set_cursor_to_row(
+            self._visual_rows(), self._cursor_global_row() + direction * half
+        )
+        # スクロールのクランプ量とカーソル移動量がずれた場合の整合
         self._drag_cursor_into_view()
 
     def init_browse_cursor(self) -> None:

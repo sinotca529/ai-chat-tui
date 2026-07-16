@@ -272,6 +272,16 @@ class ChatApp:
         def _to_input(event):
             self._enter_input_mode(event)
 
+        @kb.add("c-d", filter=is_browse)
+        def _half_page_down(event):
+            self._chat_view.scroll_half_page(1)
+            self._focus_cursor(event)
+
+        @kb.add("c-u", filter=is_browse)
+        def _half_page_up(event):
+            self._chat_view.scroll_half_page(-1)
+            self._focus_cursor(event)
+
         @kb.add("c-y", filter=is_browse)
         def _scroll_up(event):
             # カーソルはビュー内に引きずられる（vim 同様）ため、カーソルが
