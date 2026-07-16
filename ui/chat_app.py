@@ -322,11 +322,15 @@ class ChatApp:
         @kb.add("h", filter=is_browse)
         def _sibling_prev(event):
             self._switch_sibling(-1)
+            # update() で Window が作り直されるため、古い Window への
+            # フォーカスを残さない（カーソル追従スクロールが効かなくなる）
+            self._focus_cursor(event)
 
         @kb.add("right", filter=is_browse)
         @kb.add("l", filter=is_browse)
         def _sibling_next(event):
             self._switch_sibling(1)
+            self._focus_cursor(event)
 
         @kb.add("y", filter=is_browse)
         def _yank(event):

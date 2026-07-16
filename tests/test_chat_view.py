@@ -90,23 +90,28 @@ def test_update_builds_one_row_per_entry():
     assert view.last_content_window() is view._content_windows[-1]
 
 
-def test_cursor_starts_at_last_entry_and_wraps_to_sentinel():
+def test_cursor_starts_at_last_entry_and_stops_at_bottom():
     view = _view()
     view.update([
         _entry(0, Role.USER, "q"),
         _entry(1, Role.ASSISTANT, "a", parent_id=0),
         _entry(2, Role.USER, "q2", parent_id=1),
     ])
-    view.init_browse_cursor()
+    view.init_browse_cursor()  # 末尾メッセージの最終テキスト行
     assert view.selected_entry().node.id == 2
 
-    view.move_cursor_up()
+    view.move_cursor_up()  # msg1 の末尾空行（メッセージ 1 に属する）
     assert view.selected_entry().node.id == 1
+    assert view._cursor_line == 1  # 空行
+    view.move_cursor_up()  # msg1 のテキスト行
+    assert (view.selected_entry().node.id, view._cursor_line) == (1, 0)
+
     view.move_cursor_down()
-    view.move_cursor_down()  # 末尾を超えると番兵 (-1) に戻り選択なしになる
-    assert view.selected_entry() is None
-    view.move_cursor_up()  # 番兵から上移動で末尾に復帰
-    assert view.selected_entry().node.id == 2
+    view.move_cursor_down()  # msg2 のテキスト行
+    assert (view.selected_entry().node.id, view._cursor_line) == (2, 0)
+    view.move_cursor_down()  # msg2 の末尾空行（最終視覚行）
+    view.move_cursor_down()  # 最終視覚行で停止（番兵化しない）
+    assert (view.selected_entry().node.id, view._cursor_line) == (2, 1)
 
 
 def test_wrap_starts_ascii():
@@ -152,8 +157,26 @@ def test_visual_line_movement_within_wrapped_line(monkeypatch):
     view.move_cursor_down()
     assert view._cursor_seg == 1
     view.move_cursor_down()
-    view.move_cursor_down()  # 最終視覚行を超えると番兵へ
-    assert view.selected_entry() is None
+    assert view._cursor_seg == 2
+    view.move_cursor_down()  # 末尾の空行へ（スキップしない）
+    assert (view._cursor_line, view._cursor_seg) == (1, 0)
+    view.move_cursor_down()  # 最終視覚行で停止
+    assert (view._cursor_line, view._cursor_seg) == (1, 0)
+    assert view.selected_entry() is not None
+
+
+def test_blank_row_cursor_renders_marker():
+    """空行にカーソルがあるときは 1 セルのスペースをハイライト表示する"""
+    view = ChatView(_fake_session(), is_browse=lambda: True)
+    entries = [_entry(0, Role.USER, "u1")]
+    view.update(entries)
+    view.init_browse_cursor()
+    view.move_cursor_down()  # 末尾の空行へ
+    assert view._cursor_line == 1
+
+    from ui.chat_view import _RowEntry
+    frags = view._render_entry(_RowEntry.from_thread_entry(entries[0]), 0)
+    assert frags[-1] == ("bg:#1e4272", " ")  # 最終 "\n" の後 = 空行のマーカー
 
 
 def test_only_cursor_visual_row_is_highlighted(monkeypatch):
@@ -183,7 +206,9 @@ def test_line_cursor_moves_within_and_across_messages():
 
     view.move_cursor_up()
     assert (view.selected_entry().node.id, view._cursor_line) == (1, 0)
-    view.move_cursor_up()  # メッセージ境界を越えて前メッセージの最終行へ
+    view.move_cursor_up()  # 前メッセージの末尾空行へ（スキップしない）
+    assert (view.selected_entry().node.id, view._cursor_line) == (0, 3)
+    view.move_cursor_up()  # 前メッセージの最終テキスト行
     assert (view.selected_entry().node.id, view._cursor_line) == (0, 2)
     view.move_cursor_up()
     view.move_cursor_up()
@@ -211,8 +236,8 @@ def test_cursor_to_top_and_bottom(monkeypatch):
     # "* " + 200 文字 = 202 文字 → 3 視覚行の最終セグメント
     assert (view._cursor_msg, view._cursor_line, view._cursor_seg) == (1, 0, 2)
 
-    # 番兵状態（選択なし）からも直接ジャンプできる
-    view.move_cursor_down()  # 末尾を超えて番兵へ
+    # 番兵状態（ブラウズ未進入 = 選択なし）からも直接ジャンプできる
+    view._cursor_msg = -1
     assert view.selected_entry() is None
     view.move_cursor_to_top()
     assert (view._cursor_msg, view._cursor_line, view._cursor_seg) == (0, 0, 0)
@@ -261,9 +286,8 @@ def test_prev_next_message_jump():
     view.move_cursor_to_next_message()  # 末尾メッセージでは留まる（番兵に落ちない）
     assert (view._cursor_msg, view._cursor_line) == (1, 0)
 
-    # 番兵からの { は末尾メッセージの先頭へ
-    view.move_cursor_to_bottom()
-    view.move_cursor_down()
+    # 番兵（ブラウズ未進入）からの { は末尾メッセージの先頭へ
+    view._cursor_msg = -1
     assert view.selected_entry() is None
     view.move_cursor_to_prev_message()
     assert (view._cursor_msg, view._cursor_line) == (1, 0)
@@ -290,7 +314,8 @@ def test_cursor_line_clamped_when_message_shrinks():
     view.init_browse_cursor()
     assert view._cursor_line == 3
     view.update([_entry(0, Role.USER, "1\n2")])
-    assert (view.selected_entry().node.id, view._cursor_line) == (0, 1)
+    # クランプ先はメッセージ末尾の空行（line == 論理行数）まで許容
+    assert (view.selected_entry().node.id, view._cursor_line) == (0, 2)
 
 
 def test_cursor_reset_when_entries_shrink():
