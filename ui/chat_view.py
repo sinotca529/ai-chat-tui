@@ -257,13 +257,15 @@ class ChatView:
             self._cursor_line = 0
             self._cursor_seg = 0
         elif self._cursor_msg >= 0:
-            self._cursor_line = min(
-                self._cursor_line, self._line_counts[self._cursor_msg] - 1
-            )
-            self._cursor_seg = min(
-                self._cursor_seg,
-                len(self._segments(self._cursor_msg, self._cursor_line)) - 1,
-            )
+            lines = self._line_counts[self._cursor_msg]
+            self._cursor_line = min(self._cursor_line, lines)  # lines は末尾の空行
+            if self._is_on_blank_line():
+                self._cursor_seg = 0
+            else:
+                self._cursor_seg = min(
+                    self._cursor_seg,
+                    len(self._segments(self._cursor_msg, self._cursor_line)) - 1,
+                )
 
     def set_follow_bottom(self, follow: bool) -> None:
         """下端オートスクロール追従の ON/OFF。"""
@@ -313,11 +315,12 @@ class ChatView:
         self._cursor_seg = 0
 
     def move_cursor_to_bottom(self) -> None:
-        """末尾メッセージの最終視覚行へ（vim の G 相当）"""
+        """末尾メッセージの最終テキスト行へ（vim の G 相当）"""
         if not self._entries:
             return
         rows = self._visual_rows()
-        self._set_cursor_to_row(rows, len(rows) - 1, step=-1)
+        # rows[-1] は末尾メッセージの空行なので、その 1 つ上のテキスト行へ
+        self._set_cursor_to_row(rows, len(rows) - 2)
 
     def selected_entry(self) -> ThreadEntry | None:
         if 0 <= self._cursor_msg < len(self._entries):
@@ -351,8 +354,7 @@ class ChatView:
         if self._cursor_msg < 0:
             self.init_browse_cursor()
             return
-        rows = self._visual_rows()
-        self._set_cursor_to_row(rows, self._cursor_global_row() - 1, step=-1)
+        self._set_cursor_to_row(self._visual_rows(), self._cursor_global_row() - 1)
 
     def move_cursor_down(self) -> None:
         """1 視覚行下へ。末尾の視覚行では留まる（vim 同様）。
@@ -364,8 +366,7 @@ class ChatView:
         """
         if not self._entries or self._cursor_msg < 0:
             return
-        rows = self._visual_rows()
-        self._set_cursor_to_row(rows, self._cursor_global_row() + 1, step=1)
+        self._set_cursor_to_row(self._visual_rows(), self._cursor_global_row() + 1)
 
     # ── 折り返し計算 ──────────────────────────────────────────────────────────
 
@@ -385,29 +386,30 @@ class ChatView:
         """端末リサイズ等でセグメント数が減った場合に備えたクランプ。"""
         return min(self._cursor_seg, len(segs) - 1)
 
-    def _visual_rows(self) -> list[tuple[int, int, int] | None]:
+    def _is_on_blank_line(self) -> bool:
+        """カーソルがメッセージ末尾の空行（line == 論理行数）にあるか。"""
+        return self._cursor_line >= self._line_counts[self._cursor_msg]
+
+    def _visual_rows(self) -> list[tuple[int, int, int]]:
         """通し視覚行番号 → カーソル位置 (msg, line, seg) の対応表。
 
-        メッセージ末尾の空行（カーソルを置けない行）は None。この表の
-        index は描画上の視覚行番号と一致する（整合はオラクルテスト
+        メッセージ末尾の空行は (msg, 論理行数, 0) で表し、カーソルを
+        置ける（移動は常に 1 視覚行ずつ）。この表の index は描画上の
+        視覚行番号と一致する（整合はオラクルテスト
         test_wrap_math_matches_renderer が保証する）。
         """
-        rows: list[tuple[int, int, int] | None] = []
+        rows: list[tuple[int, int, int]] = []
         for m in range(len(self._entries)):
             for line in range(self._line_counts[m]):
                 for seg in range(len(self._segments(m, line))):
                     rows.append((m, line, seg))
-            rows.append(None)
+            rows.append((m, self._line_counts[m], 0))  # 末尾の空行
         return rows
 
-    def _set_cursor_to_row(self, rows, row: int, step: int) -> bool:
-        """row から step 方向に最も近いカーソル可能行へ移動する。範囲外なら False。"""
-        while 0 <= row < len(rows) and rows[row] is None:
-            row += step
-        if not (0 <= row < len(rows)):
-            return False
+    def _set_cursor_to_row(self, rows: list[tuple[int, int, int]], row: int) -> None:
+        """指定の視覚行へ移動する。範囲外は端にクランプ。"""
+        row = max(0, min(len(rows) - 1, row))
         self._cursor_msg, self._cursor_line, self._cursor_seg = rows[row]
-        return True
 
     def _cursor_global_row(self) -> int:
         """ペイン全体の仮想スクリーンにおけるカーソルの視覚行位置。"""
@@ -417,10 +419,13 @@ class ChatView:
             offset += sum(
                 len(self._segments(m, line)) for line in range(self._line_counts[m])
             ) + 1
+        lines = self._line_counts[self._cursor_msg]
         rows_before = sum(
             len(self._segments(self._cursor_msg, line))
-            for line in range(self._cursor_line)
+            for line in range(min(self._cursor_line, lines))
         )
+        if self._is_on_blank_line():
+            return offset + rows_before
         seg = self._clamped_seg(self._segments(self._cursor_msg, self._cursor_line))
         return offset + rows_before + seg
 
@@ -445,13 +450,14 @@ class ChatView:
         row = self._cursor_global_row()
         rows = self._visual_rows()
         if row < top:
-            if not self._set_cursor_to_row(rows, min(top, len(rows) - 1), step=1):
-                self.move_cursor_to_bottom()
+            self._set_cursor_to_row(rows, top)
         elif row > bottom:
-            self._set_cursor_to_row(rows, max(0, min(bottom, len(rows) - 1)), step=-1)
+            self._set_cursor_to_row(rows, bottom)
 
     def _cursor_point(self) -> Point:
         """カーソルの視覚行を表す (セグメント開始文字, 論理行) の content 座標。"""
+        if self._is_on_blank_line():
+            return Point(x=0, y=self._cursor_line)
         segs = self._segments(self._cursor_msg, self._cursor_line)
         return Point(x=segs[self._clamped_seg(segs)], y=self._cursor_line)
 
@@ -523,17 +529,22 @@ class ChatView:
 
         # 選択表示は視覚行単位: カーソルのあるセグメントの文字範囲だけ背景色を付ける。
         # update() 中の行数計測呼び出しでは _line_texts が未構築なのでスキップする
-        # （ハイライトは style のみの変更でテキストには影響しない）。
+        # （追加されるのは style のみ or 最終 "\n" 後のスペース 1 つで、
+        # 行数計測には影響しない）。
         if (
             self._is_browse()
             and index == self._cursor_msg
             and index < len(self._line_texts)
         ):
-            segs = self._segments(index, self._cursor_line)
-            seg = self._clamped_seg(segs)
-            start = segs[seg]
-            end = segs[seg + 1] if seg + 1 < len(segs) else None
-            result = _highlight_line(result, self._cursor_line, start, end)
+            if self._cursor_line >= len(self._line_texts[index]):
+                # メッセージ末尾の空行にカーソルがある: 1 セルのスペースで示す
+                result.append((_CURSOR_LINE_STYLE, " "))
+            else:
+                segs = self._segments(index, self._cursor_line)
+                seg = self._clamped_seg(segs)
+                start = segs[seg]
+                end = segs[seg + 1] if seg + 1 < len(segs) else None
+                result = _highlight_line(result, self._cursor_line, start, end)
         return result
 
     def _get_pending_text(self) -> StyleAndTextTuples:

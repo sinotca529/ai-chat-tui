@@ -292,19 +292,22 @@ async def test_j_at_bottom_does_not_rewind_view(store):
         await _wait_for(lambda: app._mode == "browse")
         bottom = await asyncio.wait_for(_settled_scroll(app), timeout=5)
         assert bottom > 0
-        cursor_before = (app._chat_view._cursor_msg, app._chat_view._cursor_line)
+        last_msg = app._chat_view._cursor_msg
+        last_text_line = app._chat_view._cursor_line
 
-        pipe.send_text("j")  # 末尾でさらに下へ
-        pipe.send_text("j")
+        pipe.send_text("j")  # 末尾テキスト行 → 末尾メッセージの空行へ
+        pipe.send_text("j")  # 最終視覚行で停止
         await asyncio.sleep(0.4)
-        # ビューは巻き戻らず、カーソルも末尾に留まる
+        # ビューは巻き戻らず、カーソルは末尾メッセージの空行に留まる
         assert app._chat_view.window.vertical_scroll == bottom
-        assert (app._chat_view._cursor_msg, app._chat_view._cursor_line) == cursor_before
-
-        pipe.send_text("k")  # 直後の k は 1 視覚行だけ上がる
-        await asyncio.sleep(0.3)
-        assert app._chat_view.window.vertical_scroll in (bottom, bottom - 1)
+        assert app._chat_view._cursor_msg == last_msg
+        assert app._chat_view._cursor_line == last_text_line + 1  # 空行
         assert app._chat_view.selected_entry() is not None
+
+        pipe.send_text("k")  # 直後の k は 1 視覚行だけ上がる（テキスト行へ復帰）
+        await asyncio.sleep(0.3)
+        assert app._chat_view.window.vertical_scroll == bottom
+        assert app._chat_view._cursor_line == last_text_line
 
 
 async def test_browse_mode_disables_autoscroll_until_next_send(store):
