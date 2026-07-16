@@ -310,6 +310,26 @@ async def test_j_at_bottom_does_not_rewind_view(store):
         assert app._chat_view._cursor_line == last_text_line
 
 
+async def test_half_page_scroll_and_ctrl_d_does_not_send(store):
+    """browse の C-u/C-d は半ページ移動で、C-d が送信にならないこと"""
+    async with _start_app(store, chunks=("行\n" * 60,)) as (app, pipe, session, api):
+        pipe.send_text("長い応答をください")
+        pipe.send_text(CTRL_D)
+        await _wait_for(lambda: len(session.current_thread()) == 2)
+        pipe.send_text(TAB)
+        await _wait_for(lambda: app._mode == "browse")
+        bottom = await asyncio.wait_for(_settled_scroll(app), timeout=5)
+        half = app._chat_view.window._viewport_height // 2
+
+        pipe.send_text("\x15")  # Ctrl+U: 半ページ上
+        await _wait_for(lambda: app._chat_view.window.vertical_scroll == bottom - half)
+
+        pipe.send_text("\x04")  # Ctrl+D: browse では半ページ下（送信しない）
+        await _wait_for(lambda: app._chat_view.window.vertical_scroll == bottom)
+        assert not app._streaming
+        assert len(session.current_thread()) == 2  # 送信されていない
+
+
 async def test_browse_mode_disables_autoscroll_until_next_send(store):
     async with _start_app(store) as (app, pipe, session, api):
         assert app._chat_view.window.stick_to_bottom  # 初期状態は追従 ON

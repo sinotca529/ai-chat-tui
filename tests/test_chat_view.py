@@ -265,6 +265,36 @@ def test_scroll_drags_cursor_into_view(monkeypatch):
     assert (view._cursor_msg, view._cursor_line) == (1, 2)  # row 5
 
 
+def test_half_page_scroll_moves_cursor_and_view_together(monkeypatch):
+    """C-d/C-u 相当: スクロールとカーソルを同量動かし、端では独立にクランプ"""
+    view = _view()
+    view.update([
+        _entry(0, Role.USER, "1\n2\n3\n4\n5"),                    # rows 0-5（空行含む）
+        _entry(1, Role.ASSISTANT, "a\nb\nc\nd\ne", parent_id=0),  # rows 6-11
+    ])
+    monkeypatch.setattr(view, "_content_width", lambda i: 80)
+    pane = view.window
+    pane._viewport_height = 4  # 半ページ = 2 行
+    pane._content_height = 12  # max_scroll = 8
+    view.init_browse_cursor()  # 末尾テキスト行 = row 10
+    pane.vertical_scroll = 8
+
+    view.scroll_half_page(-1)
+    assert (pane.vertical_scroll, view._cursor_global_row()) == (6, 8)
+    view.scroll_half_page(-1)
+    assert (pane.vertical_scroll, view._cursor_global_row()) == (4, 6)
+
+    # 上端: スクロールは 0 で止まり、カーソルも先頭まで到達できる
+    for _ in range(5):
+        view.scroll_half_page(-1)
+    assert (pane.vertical_scroll, view._cursor_global_row()) == (0, 0)
+
+    # 下端: スクロールは max で止まり、カーソルは最終視覚行（空行）まで進む
+    for _ in range(10):
+        view.scroll_half_page(1)
+    assert (pane.vertical_scroll, view._cursor_global_row()) == (8, 11)
+
+
 def test_prev_next_message_jump():
     """{ / } 相当: 途中なら現在メッセージ先頭へ、先頭なら前のメッセージ先頭へ"""
     view = _view()
